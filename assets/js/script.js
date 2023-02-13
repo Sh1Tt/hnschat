@@ -1,33 +1,32 @@
-var key;
-var keys;
-var settings = {};
+const settings = {};
+settings.formatTime = "g:i A";
+settings.formatDate = "F jS Y";
+settings.typingDelay = 2000;
+settings.typingSendDelay = 1000;
+settings.loglevel = "debug";
+settings.theme = "dark";
+settings.notificationSound = `/assets/sound/pop`;
 
-var page;
+const hc = {};
+hc.messages = [];
+hc.isActive = true;
+hc.notificationSound = new Audio(settings.notificationSound);
+
+let key;
+let keys;
 
 var tld;
-var domains;
 var domain;
+var domains;
 
 var started;
 var conversations;
 var conversation;
-var loadingConversations;
 
-var users;
-
-var fetchingMessages;
-var loadingMessages;
-var messages = [];
-
-var socket;
-
-var timeFormat = "g:i A";
-var dateFormat = "F jS Y";
+let socket,
+users;
 
 var replying;
-var imTyping;
-var typingDelay = 2000;
-var typingSendDelay = 1000;
 var typingSent;
 var lastTyped;
 var typers = {};
@@ -38,25 +37,22 @@ var avatars = {};
 
 var unexpandedLinks = [];
 
-let host = window.location.host;
-let validDomains = ["https://hnschat", "https://hns.chat"];
-var urlAction;
+const host = window.location.host;
+const validDomains = ["https://hnschat", "https://hns.chat"];
 
-let commands = ["shrug", "me", "slap"];
+let urlAction;
 
-var actionString = "\x01ACTION ";
+const commands = ["shrug", "me", "slap"];
+const actionString = "\x01ACTION ";
 
-var root = document.querySelector(':root');
-var css = getComputedStyle($("html")[0]);
+const root = document.querySelector(':root');
+const css = getComputedStyle($("html")[0]);
 
-var isActive = true;
-var notificationSound = new Audio("/assets/sound/pop");
+const browser = getBrowser();
 
-var browser = getBrowser();
+const linkRegex = /<(?:(div|a) class=\"(?:inline )?(?:nick|channel|link))(?:.+?)>(?:.+?)<\/(?:div|a)>/;
 
-var linkRegex = /<(?:(div|a) class=\"(?:inline )?(?:nick|channel|link))(?:.+?)>(?:.+?)<\/(?:div|a)>/;
-
-var emojiCategories = {
+const emojiCategories = {
 	"Search": [],
 	"People": ["Smileys & Emotion", "People & Body"],
 	"Nature": ["Animals & Nature"],
@@ -66,168 +62,164 @@ var emojiCategories = {
 	"Objects": ["Objects"],
 	"Symbols": ["Symbols"],
 	"Flags": ["Flags"]
-}
+};
 
-function isMobile() {
-	if ($(".header .left").css("display") === "flex") {
-		return true;
-	}
-	return false;
-}
+const isMobile = () => $(".header .left").css("display") === "flex";
 
-function log(data) {
-	console.log(data);
-}
+const log = input => {
+	const levels = ["debug", "info", "warn", "error", "verbose"];
+	const { loglevel } = settings;
+	if (!levels.includes(loglevel)) return;
+	const output = typeof input === "object" ? JSON.stringify(input) : input;
+	if (loglevel === "verbose" 
+	|| loglevel === "debug" 
+	|| loglevel === "error"
+	) {
+		const ts = new Date().toLocaleTimeString();
+		console.log(`[${ts}] ${loglevel} - ${output}`);
+	} 
+	else {
+		console.log(output);
+	};
+};
 
-function rtrim(str, chr) {
-  var rgxtrim = (!chr) ? new RegExp('\\s+$') : new RegExp(chr+'+$');
-  return str.replace(rgxtrim, '');
-}
+const rtrim = (str, chr) =>  str.replace(new RegExp(!chr ? '\\s+$' : chr+'+$'), '');
 
-function ltrim(str, chr) {
-  var rgxtrim = (!chr) ? new RegExp('^\\s+') : new RegExp('^'+chr+'+');
-  return str.replace(rgxtrim, '');
-}
+const ltrim = (str, chr) =>  str.replace(new RegExp(!chr ? '^\\s+' : '^'+chr+'+'), '');
 
-async function api(data) {
-	if (key) {
-		data["key"] = key;
-	}
+const api = async data => {
+	if (hc.key)
+		data["key"] = hc.key;
 
-	let output = new Promise(resolve => {
-		$.post("/api", JSON.stringify(data), (response) => {
+	return await new Promise(resolve => {
+		$.post("/api", JSON.stringify(data), response => {
 			if (response) {
-				let json = JSON.parse(response);
-
+				const json = JSON.parse(response);
 				resolve(json);
+			}
+			else {
+				resolve();
 			}
 		});
 	});
+};
 
-	return await output;
-}
-
-async function upload(data, attachment) {
-	let output = new Promise(resolve => {
-		$.ajax({
-	        url: "/upload",
-	        type: "POST",
-	        data: data,
-	        cache: false,
-	        contentType: false,
-	        processData: false,
-	        beforeSend: (e) => {},
-	        xhr: () => {
-	            var p = $.ajaxSettings.xhr();
-	            p.upload.onprogress = () => {}
-				return p;
-			},
-			success: (response) => {
-				let json = JSON.parse(response);
-
-				resolve(json);
-			}
-	    });
+const upload = async (data, attachment) => await new Promise(resolve => {
+	$.ajax({
+		url: "/upload",
+		type: "POST",
+		data: data,
+		cache: false,
+		contentType: false,
+		processData: false,
+		beforeSend: (e) => {},
+		xhr: () => {
+			var p = $.ajaxSettings.xhr();
+			p.upload.onprogress = () => {}
+			return p;
+		},
+		success: (response) => {
+			const json = JSON.parse(response);
+			resolve(json);
+		}
 	});
+});
 
-	return await output;
-}
+const ws = (cmd, body) => {
+	socket.send(cmd+" "+JSON.stringify(body))
+};
 
-function ws(command, body) {
-	socket.send(command+" "+JSON.stringify(body))
-}
+const startSession = ()	=> {
+	if (hc.key) return;
 
-function startSession() {
-	if (key) {
-		return;
-	}
-
-	let data = {
+	const data = {
 		action: "startSession"
 	};
 
 	return api(data);
-}
+};
 
-function addDomain(name) {
-	let data = {
+const addDomain = name => {
+	const data = {
 		action: "addDomain",
 		domain: toASCII(name)
 	};
 
 	return api(data);
-}
+};
 
-function listTLD() {
-	let data = {
+const listTLD = () => {
+	const data = {
 		action: "listTLD"
 	};
 
 	return api(data);
-}
+};
 
-function checkTLD(tld) {
-	let data = {
+const checkTLD = tld => {
+	const data = {
 		action: "checkTLD",
-		tld: toASCII(tld),
+		tld: toASCII(tld)
 	};
 
 	return api(data);
-}
+};
 
-function addSLD(sld, tld) {
-	let data = {
+const addSLD = (sld, tld) => {
+	const data = {
 		action: "addSLD",
 		sld: toASCII(sld),
 		tld: toASCII(tld)
 	};
 
-	if (typeof invite !== "undefined" && invite.length) {
+	if (typeof invite !== "undefined" 
+		&& invite.length
+	) {
 		data["invite"] = invite;
 	}
 
 	return api(data);
-}
+};
 
-function verifyDomain(domain) {
-	let data = {
+const verifyDomain = domain => {
+	const data = {
 		action: "verifyDomain",
 		domain: domain
 	};
 
 	return api(data);
-}
+};
 
-function getDomains() {
-	let data = {
+const getDomains = () => {
+	const data = {
 		action: "getDomains"
 	};
 
 	return api(data);
-}
+};
 
-function deleteAttachment(id) {
-	let data = {
+const deleteAttachment = id => {
+	const data = {
 		action: "deleteAttachment",
 		id: id
 	};
 
 	return api(data);
-}
+};
 
-function markConversationUnreadIfNeeded(id) {
+const markConversationUnreadIfNeeded = id => {
 	if (id !== conversation) {
-		let data = conversations[id];
+		const data = conversations[id];
 		if (data.unreadMessages) {
 			$("#conversations tr[data-id="+id+"]").addClass("unread");
 		}
 		if (data.unreadMentions) {
 			$("#conversations tr[data-id="+id+"]").addClass("mentions");
 		}
-	}
+	};
 
 	updateMessageTabs();
-}
+};
 
 function updateSearchView() {
 	if ($("#users .title .searching").is(":visible")) {
@@ -246,8 +238,8 @@ function updateSearchView() {
 	}
 }
 
-function searchUsers(query) {
-	let users = $("#users tr.user");
+const searchUsers = query => {
+	const users = $("#users tr.user");
 
 	$.each(users, (k, user) => {
 		let match = Array.from(toUnicode($(user).data("name").toString())).slice(0, Array.from(query).length).join("").toLowerCase();
@@ -260,17 +252,13 @@ function searchUsers(query) {
 			$(user).addClass("hidden");
 		}
 	});
-}
+};
 
 function insertConversations() {
-	let sortedArray = Object.entries(conversations).sort((a,b) => {
-		if (a[1]["latestMessage"].time > b[1]["latestMessage"].time) {
-			return -1;
-		}
-		return 1;
-	});
+	const sortedArray = Object.entries(conversations)
+		.sort((a,b) => (a[1]["latestMessage"].time > b[1]["latestMessage"].time) ? -1 : 1);
 
-	var sortedObject = {};
+	let sortedObject = {};
 	$(sortedArray).each((k, conversation) => {
 		sortedObject[conversation[0]] = conversation[1];
 	});
@@ -280,17 +268,17 @@ function insertConversations() {
 	$("#conversations .section table").empty();
 	$.each(conversations, (k, conversation) => {
 		if (isGroup(k)) {
-			let name = conversation.name;
+			const name = conversation.name;
 			$("#conversations .channels table").append(conversationRow(k, name));
 		}
 		else {
-			let user = Object.keys(conversation.users).filter(user => {
-				return user !== domain;
-			}).join(", ");
-			let name = conversation.users[user];
+			const user = Object.keys(conversation.users)
+				.filter(user => user !== domain).join(", ");
+			
+			const name = conversation.users[user];
 			$("#conversations .private table").append(conversationRow(k, name));
 			updateAvatars();
-		}
+		};
 
 		decryptConversationSubtitle(k);
 		markConversationUnreadIfNeeded(k);
@@ -307,22 +295,18 @@ function insertConversations() {
 		else {
 			inputEnabled(false, "empty");
 		}
-	}
+	};
 
 	onLoadAction(urlAction);
-}
+};
 
-function toASCII(string) {
-	var ascii = nameToAscii(string);
-	return ascii;
-}
+const toASCII = string => nameToAscii(string);
 
-function toUnicode(string) {
-	var unicode = punycode.ToUnicode(string);
+const toUnicode = string => {
+	const unicode = punycode.ToUnicode(string);
 	unicode = nameToUnicode(unicode);
-
 	return unicode;
-}
+};
 
 function updateConversation(body) {
 	let conversation = body.conversation;
@@ -470,28 +454,24 @@ function updateOtherAvatars(id) {
 	}
 }
 
-async function makeSecret(k) {
-	let derivedKey = new Promise(resolve => {
-		let otherUser = getOtherUser(k);
-		let otherKey = JSON.parse(otherUser.pubkey);
-
-		if (otherKey) {
-			deriveKey(otherKey, keys.privateKeyJwk).then(d => {
+const makeSecret = async k => await new Promise(resolve => {
+	const otherUser = getOtherUser(k);
+	const otherKey = JSON.parse(otherUser.pubkey);
+	if (otherKey) {
+		deriveKey(otherKey, hc.keys.privateKeyJwk)
+			.then(d => {
 				conversations[k].key = d;
 				decryptConversationSubtitle(k);
 				resolve(d);
 			});
-		}
-		else {
-			resolve();
-		}
-	}); 
-
-	return await derivedKey;
-}
+	}
+	else {
+		resolve();
+	};
+});
 
 function getUsers() {
-	let data = {
+	const data = {
 		action: "getUsers"
 	};
 
@@ -499,7 +479,7 @@ function getUsers() {
 }
 
 function loadConversations() {
-	loadingConversations = true;
+	hc.loadingConversations = true;
 	getConversations(domain).then(r => {
 		conversation = null;
 
@@ -528,7 +508,7 @@ function loadConversations() {
 				insertConversations();
 			});
 		}
-		loadingConversations = false;
+		hc.loadingConversations = false;
 	});
 }
 
@@ -570,7 +550,7 @@ async function setupConversations() {
 }
 
 function getConversations(domain) {
-	let data = {
+	const data = {
 		action: "getConversations",
 		domain: domain
 	};
@@ -579,11 +559,11 @@ function getConversations(domain) {
 }
 
 function loadMessages(conversation, options={}) {
-	fetchingMessages = true;
+	hc.fetchingMessages = true;
 	getMessages(conversation, options).then(r => {
 		$("#chats .content .needSLD").remove();
 
-		fetchingMessages = false;
+		hc.fetchingMessages = false;
 		if (r.success) {
 			var before = false;
 			if (options.before) {
@@ -591,7 +571,7 @@ function loadMessages(conversation, options={}) {
 			}
 
 			let msgs = r.messages;
-			loadingMessages = msgs.length;
+			hc.loadingMessages = msgs.length;
 			$.each(msgs, (k, message) => {
 				prepareMessage(message, true, before);
 			});
@@ -682,7 +662,7 @@ function loadMessages(conversation, options={}) {
 }
 
 function getMessages(conversation, options) {
-	let data = {
+	const data = {
 		action: "getMessages",
 		conversation: conversation,
 		domain: domain
@@ -872,71 +852,74 @@ function replaceNames(message) {
 	return output;
 }
 
-async function messageBody(message) {
-	let output = new Promise(resolve => {
-		if (isGroup(message.conversation)) {
-			resolve(message.message.trim());
-		}
-		else {
-			let dkey = conversations[message.conversation].key;
-			decryptMessage(message.message, dkey, message.conversation).then(decoded => {
+const messageBody = async message => await new Promise(resolve => {
+	if (isGroup(message.conversation)) {
+		resolve(message.message.trim());
+	}
+	else {
+		const _dKey = conversations[message.conversation].key;
+		decryptMessage(message.message, _dKey, message.conversation)
+			.then(decoded => {
 				resolve(decoded.trim());
 			});
-		}
-	});
+	};
+});
 
-	return await output;
-}
+const prepareMessage = (message, old = true, before = false) => {
+	messageBody(message)
+		.then(theMessage => {
+			let push = false;
 
-function prepareMessage(message, old=true, before=false) {	
-	messageBody(message).then(theMessage => {
-		var push = false;
+			message.reactions = JSON.parse(message.reactions);
 
-		message.reactions = JSON.parse(message.reactions);
+			if (before) {
+				hc.messages.unshift(message);
+			}
+			else {
+				hc.messages.push(message);
+			};
 
-		if (before) {
-			messages.unshift(message);
-		}
-		else {
-			messages.push(message);
-		}
+			const messageDate = new Date(message.time * 1000).format(settings.formatDate);
+			const messageTime = new Date(message.time * 1000).format(settings.formatTime);
+			
+			let messageSender = "";
+		
+			if (message.from) {
+				messageSender = message.from;
+			}
+			else if (message.user) {
+				messageSender = message.user;
+			};
 
-		let messageDate = new Date(message.time * 1000).format(dateFormat);
-		let messageTime = new Date(message.time * 1000).format(timeFormat);
-		var messageSender = "";
-		if (message.from) {
-			messageSender = message.from;
-		}
-		else if (message.user) {
-			messageSender = message.user;
-		}
+			let messageUser = nameForUserInConversation(message.conversation, messageSender);
 
-		let messageUser = nameForUserInConversation(message.conversation, messageSender);
+			if (hc.fetchingMessages)
+				return;
 
-		if (fetchingMessages) {
-			return;
-		}
+			if (message.conversation == conversation) {
+				insertMessage(message, theMessage, before, messageSender, messageUser, messageDate, messageTime);
 
-		if (message.conversation == conversation) {
-			insertMessage(message, theMessage, before, messageSender, messageUser, messageDate, messageTime);
-
-			if (!isActive) {
+				if (!hc.isActive)
+					push = true;
+					
+			}
+			else {
 				push = true;
-			}
-		}
-		else {
-			push = true;
-		}
+			};
 
-		if (!old && push && messageSender !== domain) {
-			var replaced = replaceIds(theMessage, false);
-			if (!isGroup(message.conversation)) {
-				sendNotification(messageUser, replaced, message.conversation);
+			if (
+				!old 
+				&& push 
+				&& messageSender !== domain
+			) {
+				const replaced = replaceIds(theMessage, false);
+				if (!isGroup(message.conversation)) {
+					sendNotification(messageUser, replaced, message.conversation);
+				}
+				else if (theMessage.includes("@"+domain)) {
+					sendNotification(messageUser+" - #"+conversations[message.conversation].name, replaced, message.conversation);
+				};
 			}
-			else if (theMessage.includes("@"+domain)) {
-				sendNotification(messageUser+" - #"+conversations[message.conversation].name, replaced, message.conversation);
-			}
-		}
 	});
 }
 
@@ -948,26 +931,26 @@ function insertMessage(message, theMessage, before, messageSender, messageUser, 
 
 	let messageHolder = $("#messages");
 
-	var messageRow = $('<div class="messageRow" />');
-	var contents = $('<div class="contents" />');
-	var holder = $('<div class="holder" />');
-	var row = $('<div class="message" />');
-	var body = $('<div class="body" />');
+	const messageRow = $('<div class="messageRow" />');
+	const contents = $('<div class="contents" />');
+	const holder = $('<div class="holder" />');
+	const row = $('<div class="message" />');
+	const body = $('<div class="body" />');
 
-	var holder2 = $('<div class="holder react" />');
-	var reactions = $('<div class="reactions" />');
+	const holder2 = $('<div class="holder react" />');
+	const reactions = $('<div class="reactions" />');
 
-	var hover = $('<div class="hover" />');
+	const hover = $('<div class="hover" />');
 
-	var actions = $('<div class="actions" />');
-	var reply = $('<div class="action icon reply" data-action="reply" />');
-	var emoji = $('<div class="action icon emoji" data-action="emojis" />');
-	var del = $('<div class="action icon delete" data-action="deleteMessage" />');
-	var time = $('<div class="time" />');
+	const actions = $('<div class="actions" />');
+	const reply = $('<div class="action icon reply" data-action="reply" />');
+	const emoji = $('<div class="action icon emoji" data-action="emojis" />');
+	const del = $('<div class="action icon delete" data-action="deleteMessage" />');
+	const time = $('<div class="time" />');
 
-	var signature = $('<div class="signature" />');
-	var user = $('<div class="user" />');
-	var lastUser = $('<div class="user" />');
+	const signature = $('<div class="signature" />');
+	const user = $('<div class="user" />');
+	const lastUser = $('<div class="user" />');
 	time.html(messageTime);
 	user.html(messageUser+"/");
 	messageRow.attr("data-id", message.id);
@@ -1145,308 +1128,301 @@ function insertMessage(message, theMessage, before, messageSender, messageUser, 
 	fixScroll(before, messageRow);
 
 	setTimeout(() => {
-		loadingMessages -= 1;
+		hc.loadingMessages -= 1;
 	}, 1);
 
 	if (!attachment) {
 		linkifyMessage(body);
 	}
 
-	let msg = messages.filter(m => {
-		return message.id == m.id;
-	});
-	if (msg.length) {
+	let msg = hc.messages.filter(m => message.id === m.id);
+	if (msg.length)
 		updateReactions(msg[0]);
-	}
 
 	stylizeMessage(messageRow);
 	updateAvatars();
 }
 
 function stylizeMessage(message) {
-	let messageHolder = $("#messages");
+	// const messageHolder = $("#messages");
+	const firstMessage = $("#messages > .messageRow[data-id]").first();
+	const firstMessageID = firstMessage.data("id");
 
-	let firstMessage = $("#messages > .messageRow[data-id]").first();
-	let firstMessageID = firstMessage.data("id");
+	const lastMessage = $("#messages > .messageRow[data-id]").last();
+	const lastMessageID = lastMessage.data("id");
 
-	let lastMessage = $("#messages > .messageRow[data-id]").last();
-	let lastMessageID = lastMessage.data("id");
-
-	let messageID = message.data("id");
-	let messageTime = message.data("time");
-	let messageDate = new Date(messageTime * 1000).format(dateFormat);
-	let contents = message.find(".contents");
-	let messageSender = message.data("sender");
-	var messageUser;
-
-	let previousMessage = message.prev();
-	let previousMessageTime = previousMessage.data("time");
-	let previousMessageDate = new Date(previousMessageTime * 1000).format(dateFormat);
-	let previousMessageSender = previousMessage.data("sender");
-
-	let nextMessage = message.next();
-	let nextMessageTime = nextMessage.data("time");
-	let nextMessageDate = new Date(nextMessageTime * 1000).format(dateFormat);
-	let nextMessageSender = nextMessage.data("sender");
-	var nextMessageUser;
-
-	var isFirst = false;
-	var isLast = false;
-
-	var isReply = false;
-
-	var isInformational = false;
-	var isAction = false;
-	var isDate = false;
-
-	var before = false;
-
-	var addUser = false;
-	var addNextUser = false;
-	var removeUser = false;
-	var removeNextUser = false;
+	const messageID = message.data("id");
+	const messageTime = message.data("time");
+	const messageDate = new Date(messageTime * 1000).format(settings.formatDate);
+	const contents = message.find(".contents");
+	const messageSender = message.data("sender");
 	
-	var prependDate = false;
-	var appendDate = false;
+	let messageUser;
+	
+	const previousMessage = message.prev();
+	const previousMessageTime = previousMessage.data("time");
+	const previousMessageDate = new Date(previousMessageTime * 1000).format(settings.formatDate);
+	const previousMessageSender = previousMessage.data("sender");
 
-	if (firstMessageID == messageID) {
-		isFirst = true;
-	}
+	const nextMessage = message.next();
+	const nextMessageTime = nextMessage.data("time");
+	const nextMessageDate = new Date(nextMessageTime * 1000).format(settings.formatDate);
+	const nextMessageSender = nextMessage.data("sender");
+	
+	let nextMessageUser;
 
-	if (lastMessageID == messageID) {
-		isLast = true;
-	}
+	const __ = {};
+	
+	__.isFirst = false;
+	__.isLast = false;
 
-	if (message.hasClass("replying")) {
-		isReply = true;
-	}
+	__.isReply = false;
 
-	if (message.hasClass("informational")) {
-		isInformational = true;
-	}
+	__.isInformational = false;
+	__.isAction = false;
+	__.isDate = false;
 
-	if (message.hasClass("date")) {
-		isDate = true;
-	}
+	__.before = false;
 
-	if (message.hasClass("action")) {
-		isAction = true;
-	}
+	__.addUser = false;
+	__.addNextUser = false;
+	__.removeUser = false;
+	__.removeNextUser = false;
+	
+	__.prependDate = false;
+	__.appendDate = false;
 
-	if (nextMessage.length) {
-		before = true;
-	}
+	if (firstMessageID == messageID)
+		__.isFirst = true;
 
-	if (isFirst || isReply) {
-		addUser = true;
-	}
+	if (lastMessageID == messageID)
+		__.isLast = true;
 
-	if (!before) {
-		if (!isDate && previousMessage.length && messageDate !== previousMessageDate && !previousMessage.hasClass("date")) {
-			prependDate = true;
+	if (message.hasClass("replying"))
+		__.isReply = true;
+
+	if (message.hasClass("informational"))
+		__.isInformational = true;
+
+	if (message.hasClass("date"))
+		__.isDate = true;
+
+	if (message.hasClass("action"))
+		__.isAction = true;
+
+	if (nextMessage.length)
+		__.before = true;
+
+	if (__.isFirst || __.isReply)
+		__.addUser = true;
+
+	if (!__.before) {
+		if (!__.isDate && previousMessage.length && messageDate !== previousMessageDate && !previousMessage.hasClass("date")) {
+			__.prependDate = true;
 		}
 	}
 	else {
-		if (!isDate && nextMessage.length && messageDate !== nextMessageDate && !nextMessage.hasClass("date")) {
-			appendDate = true;
+		if (!__.isDate && nextMessage.length && messageDate !== nextMessageDate && !nextMessage.hasClass("date")) {
+			__.appendDate = true;
 		}
-	}
+	};
 
-	if (isDate) {
+	if (__.isDate) {
 		previousMessage.addClass("last");
 		message.addClass("first last");
 
 		if (nextMessage.length) {
-			addNextUser = true;
+			__.addNextUser = true;
 		}
 	}
 	else {
-		var timeDifference;
+		let timeDifference;
 
 		messageUser = nameForUserInConversation(conversation, messageSender);
 
-		if (before) {
+		if (__.before) {
 			message.addClass("first");
 		}
 		else {
 			message.addClass("last");	
-		}
+		};
 
-		if (isFirst || isReply) {
+		if (__.isFirst 
+		|| __.isReply
+		)
 			message.addClass("first");
-		}
 
-		if (isLast) {
+		if (__.isLast)
 			message.addClass("last");
-		}
 
 		if (previousMessage.length) {
 			timeDifference = messageTime - previousMessageTime;
 
-			if (timeDifference > 60 || previousMessageSender !== messageSender) {
+			if (timeDifference > 60 
+			|| previousMessageSender !== messageSender
+			) {
 				previousMessage.addClass("last");
 				message.addClass("first");
-				addUser = true;
+				__.addUser = true;
 			}
-			else if (!isReply) {
-				removeUser = true;
-			}
-		}
+			else if (!__.isReply) {
+				__.removeUser = true;
+			};
+		};
 
-		if (timeDifference < 60 && previousMessageSender == messageSender && !message.hasClass("replying")) {
+		if (timeDifference < 60
+		&& previousMessageSender == messageSender
+		&& !message.hasClass("replying")
+		)
 			previousMessage.removeClass("last");
-		}
 
-		if (previousMessageSender !== messageSender) {
+		if (previousMessageSender !== messageSender)
 			previousMessage.addClass("last");
-		}
 
 		if (nextMessage.length) {
 			timeDifference = nextMessageTime - messageTime;
 
 			if (timeDifference > 60) {
 				nextMessage.addClass("first");
-				addNextUser = true;
+				__.addNextUser = true;
 			}
 
 			if (nextMessage.hasClass("first")) {
 				message.addClass("last");
 			}
-		}
+		};
 
-		if (timeDifference < 60 && nextMessageSender == messageSender && !nextMessage.hasClass("replying")) {
-			removeNextUser = true;
-		}
+		if (timeDifference < 60 
+		&& nextMessageSender == messageSender 
+		&& !nextMessage.hasClass("replying")
+		)
+			__.removeNextUser = true;
+		
+		switch (true) {
+			case __.addUser:
+				if (!contents.find(".user").length) {
+					const user = $('<div class="user" />');
+					user.html(messageUser+"/");
+					contents.prepend(user);
+					contents.prepend(messageAvatar(messageSender, messageUser));
+				};
+				break;
 
-		if (addUser) {
-			if (!contents.find(".user").length) {
-				var user = $('<div class="user" />');
-				user.html(messageUser+"/");
-				contents.prepend(user);
-				contents.prepend(messageAvatar(messageSender, messageUser));
-			}
-		}
-		if (removeUser) {
-			message.removeClass("first");
-			message.find(".contents .user").remove();
-			message.find(".contents .avatar").remove();
-		}
-		if (removeNextUser) {
-			message.removeClass("last");
-			nextMessage.removeClass("first");
-			nextMessage.find(".contents .user").remove();
-			nextMessage.find(".contents .avatar").remove();
-		}
-		if (prependDate) {
-			var infoRow = $('<div class="messageRow informational date last" />');
-			infoRow.html(messageDate);
-			infoRow.insertBefore(message);
-			stylizeMessage(infoRow);
-		}
-		if (appendDate) {
-			var infoRow = $('<div class="messageRow informational date last" />');
-			infoRow.html(nextMessageDate);
-			infoRow.insertAfter(message);
-			stylizeMessage(infoRow);
-		}
-	}
+			case __.removeUser:
+				message.removeClass("first");
+				message.find(".contents .user").remove();
+				message.find(".contents .avatar").remove();
+				break;
+		
+			case __.removeNextUser:
+				message.removeClass("last");
+				nextMessage.removeClass("first");
+				nextMessage.find(".contents .user").remove();
+				nextMessage.find(".contents .avatar").remove();
+				break;
+				
+			case __.prependDate:
+				let infoRow = $('<div class="messageRow informational date last" />');
+				infoRow.html(messageDate);
+				infoRow.insertBefore(message);
+				stylizeMessage(infoRow);
+				break;
+			
+			case __.appendDate:
+				let infoRow = $('<div class="messageRow informational date last" />');
+				infoRow.html(nextMessageDate);
+				infoRow.insertAfter(message);
+				stylizeMessage(infoRow);
+				break;
+			
+			default:
+				break;
+		};
+	};
 
-	if (addNextUser) {
+	if (__.addNextUser) {
 		if (!nextMessage.find(".contents .user").length) {
 			nextMessageUser = nameForUserInConversation(conversation, nextMessageSender);
-			var user = $('<div class="user" />');
+			let user = $('<div class="user" />');
 			user.html(nextMessageUser+"/");
 			nextMessage.addClass("first");
 			nextMessage.find(".contents").prepend(user);
 			nextMessage.find(".contents").prepend(messageAvatar(nextMessageSender, nextMessageUser));
-		}
-	}
+		};
+	};
 
 	updateAvatars();
-}
+};
 
-function replaceRange(s, start, end, substitute) {
-	var before = s.substr(0, start);
-	var after = s.substr(end, (s.length -end));
-
+const replaceRange = (s, start, end, substitute) => {
+	const before = s.substr(0, start);
+	const after = s.substr(end, (s.length -end));
 	return before+substitute+after;
-}
+};
 
 class regex extends RegExp {
 	[Symbol.matchAll](str) {
 		const result = RegExp.prototype[Symbol.matchAll].call(this, str);
-		if (!result) {
+		if (!result)
 			return null;
-		}
+		
 		return Array.from(result);
-	}
-}
+	};
+};
 
-function isIn(type, string, index, length) {
-	var result = false;
+const isIn = (type, string, index, length) => {
+	let result = false;
 
 	switch (type) {
 		case "link":
-			var isInRegex = new regex(linkRegex, 'gim');
+			const isInRegex = new regex(linkRegex, 'gim');
 			break;
 	}
 
-	var matches = string.matchAll(isInRegex).reverse();
-	$.each(matches, (k, m) => {
-		var link = m[0];
-		var start = m.index;
-		var end = m.index + link.length;
+	const matches = string.matchAll(isInRegex).reverse();
+	matches.forEach(m => {
+		const link = m[0];
+		const start = m.index;
+		const end = m.index + link.length;
 		
-		if (index >= start && index < end) {
+		if (index >= start && index < end)
 			result = true;
-		}
+
 	});
 
 	return result;
 }
 
-function mentionsMe(message) {
-	var output = false;
-
-	let r = new regex(/\@(?<name>[a-zA-Z0-9]{16})/, 'gm');
-	var matches = message.matchAll(r);
-	$.each(matches, (k, m) => {
-		if (domain == m.groups.name) {
-			output = true;
-		}
-	});
-
-	return output;
+const mentionsMe = message => {
+	const r = new regex(/\@(?<name>[a-zA-Z0-9]{16})/, 'gm');
+	const matches = message.matchAll(r);
+	return matches.filter(m => domain === m.groups.name).length > 0;
 }
 
-function linkifyMessage(element) {
-	var output = element.text();
-	let links = anchorme.list(output).reverse();
-
-	$.each(links, (k, link) => {
-		var href = link.string;
-
+const linkifyMessage = element => {
+	let output = element.text();
+	const links = anchorme.list(output).reverse();
+	links.forEach(link => {
+		let href = link.string;
 		if (link.isEmail) {
 			href = "mailto:"+href;
 		}
 		else if (link.isURL && href.substring(0, 8) !== "https://" && href.substring(0, 7) !== "http://") {
 			href = "http://"+href;
-		}
-
-		let replace = '<a class="inline link" href="'+href+'" target="_blank">'+link.string+'</a>';
+		};
+		const replace = `<a class="inline link" href="${href}" target="_blank">${link.string}</a>`;
 		output = replaceRange(output, link.start, link.end, replace);
 	});
 
-	let isMention = mentionsMe(output);
-	if (isMention) {
+	const isMention = mentionsMe(output);
+	if (isMention)
 		element.closest(".messageRow").addClass("mention");
-	}
 
 	output = replaceIds(output);
 
 	element.html(output);
 	expandLinks(element);
-}
+};
 
 function expandLinks(element) {
 	let messageRow = element.parent();
@@ -1455,7 +1431,7 @@ function expandLinks(element) {
 	if (links.length) {
 		let link = links[0].href;
 		
-		let data = {
+		const data = {
 			action: "getMetaTags",
 			url: link
 		}
@@ -1509,35 +1485,32 @@ function expandLinks(element) {
 	}
 }
 
-function checkName(from, to) {
-	let data = {
+const checkName = (from, to) => {
+	const data = {
 		action: "checkName",
 		from: domain,
 		domain: to
 	};
 
 	return api(data);
-}
+};
 
-async function encryptIfNeeded(conversation, message, dkey) {
-	let output = new Promise(resolve => {
-		if (dkey) {
-			encryptMessage(message, dkey, conversation).then(m => {
+const encryptIfNeeded = async (conversation, message, dkey) => await new Promise(resolve => {
+	if (dkey) {
+		encryptMessage(message, dkey, conversation)
+			.then(m => {
 				resolve(m);
 			});
-		}
-		else {
-			resolve(message);
-		}
-	});
-
-	return await output;
-}
+	}
+	else {
+		resolve(message);
+	};
+});
 
 function sendMessage(conversation, message, signature=false) {
 	let dkey = conversations[conversation].key || null;
+	let theMessage = message;
 
-	var theMessage = message;
 	if (message[0] === "/") {
 		if (message.length > 1 && message[1] !== "/") {
 			let stripped = message.substring(1);
@@ -1548,9 +1521,9 @@ function sendMessage(conversation, message, signature=false) {
 			
 			switch (command) {
 				case "me":
-					if (!body.length) {
+					if (!body.length)
 						return;
-					}
+
 					theMessage = actionString+body;
 					break;
 
@@ -1559,35 +1532,36 @@ function sendMessage(conversation, message, signature=false) {
 					break;
 
 				case "slap":
-					if (!body.length) {
+					if (!body.length)
 						return;
-					}
 
-					var who = rtrim(split[0], "[/ ]");
-					let filtered = Object.keys(conversations[conversation].users).filter(k => {
-						return who.toLowerCase() == nameForUserID(k).domain.toLowerCase();
-					});
+					let who = rtrim(split[0], "[/ ]");
+					
+					const filtered = Object.keys(conversations[conversation].users)
+						.filter(k => who.toLowerCase() === nameForUserID(k).domain.toLowerCase());
 
-					if (!filtered.length) {
-						return
-					}
+					if (!filtered.length) 
+						return;
 
 					who = nameForUserID(filtered[0]).domain;
-					theMessage = actionString+"slaps @"+who+"/ around a bit with a large trout";
+					theMessage =  `${actionString} slaps @${who}/ around a bit with a large trout`;
 					break;
 
 				default:
 					return;
-			}
+			};
 		}
-		else if (message.length > 1 && message[1] == "/") {
+		else if (message.length > 1 
+			&& message[1] == "/"
+		) {
 			theMessage = theMessage.substring(1);
-		}
-	}
+		};
+	};
 
 	theMessage = replaceNames(theMessage);
+	
 	encryptIfNeeded(conversation, theMessage, dkey).then(m => {
-		let data = {
+		const data = {
 			action: "sendMessage",
 			conversation: conversation,
 			from: domain,
@@ -1604,13 +1578,13 @@ function sendMessage(conversation, message, signature=false) {
 			data["signature"] = signature;
 		}
 
-		imTyping = false;
+		hc.imTyping = false;
 		ws("ACTION", data);
 	});
 }
 
 function markSeen(id) {
-	let data = {
+	const data = {
 		action: "markSeen",
 		conversation: conversation,
 		domain: domain,
@@ -1651,7 +1625,7 @@ function goto(link, open) {
 }
 
 function sizeInput() {
-	if (page == "chat") {
+	if (hc.page == "chat") {
 		let input = $(".input textarea");
 		input.css("height", "1px");
 
@@ -1807,13 +1781,13 @@ function activeConversation(id){
 
 	$("#messages").empty();
 	$("#chats .content .needSLD").remove();
-	messages = [];
+	hc.messages = [];
 	unexpandedLinks = [];
 	replying = false;
 	updateReplying();
 	close();
 
-	if (!loadingConversations) {
+	if (!hc.loadingConversations) {
 		loadMessages(conversation);
 	}
 
@@ -2023,7 +1997,7 @@ function escape(str) {
 }
 
 function shareLink() {
-	let data = {
+	const data = {
 		session: key,
 		privkey: keys.privateKeyJwk.d,
 		settings: settings
@@ -2054,7 +2028,7 @@ function setupShare() {
 }
 
 function setPublicKey() {
-	let data = {
+	const data = {
 		action: "setPublicKey",
 		pubkey: JSON.stringify(keys.publicKeyJwk)
 	};
@@ -2063,7 +2037,7 @@ function setPublicKey() {
 }
 
 function getPublicKey() {
-	let data = {
+	const data = {
 		action: "getPublicKey"
 	};
 
@@ -2081,7 +2055,7 @@ function loadSettings() {
 }
 
 function getInvite(code) {
-	let data = {
+	const data = {
 		action: "getInvite",
 		code: code
 	};
@@ -2092,7 +2066,7 @@ function getInvite(code) {
 function onLoad() {
 	var action;
 
-	switch (page) {
+	switch (hc.page) {
 		case "id":
 			if (typeof invite !== "undefined" && invite.length) {
 				getInvite(invite).then(r => {
@@ -2316,7 +2290,7 @@ async function popover(action) {
 				let to = getOtherUser(conversation).domain;
 				let toID = getOtherUserID(conversation);
 
-				let data = {
+				const data = {
 					action: "getAddress",
 					domain: toID
 				}
@@ -2348,7 +2322,7 @@ async function popover(action) {
 					if (["hnschat", "theshake"].includes(tld)) {
 						$(".popover[data-name="+action+"]").find("input[name=address]").parent().removeClass("hidden");
 
-						let data = {
+						const data = {
 							action: "getAddress",
 							domain: domain
 						}
@@ -2438,22 +2412,14 @@ function showChat(bool) {
 	}
 	else {
 		$("body[data-page=chat] .connecting").removeClass("hidden");
-	}
-}
+	};
+};
 
-function socketReady() {
-	if (socket && socket.readyState == 1) {
-		return true;
-	}
-	return false;
-}
+const socketReady = () => socket && socket.readyState == 1;
 
-function websocket() {
-	if (socket) {
-		if (socket.readyState !== 3) {
-			return;
-		}
-	}
+const websocket = () => {
+	if (socket)
+		if (socket.readyState !== 3) return;
 
 	socket = new WebSocket("wss://"+host+"/wss");
 
@@ -2534,7 +2500,7 @@ function parse(message) {
 						unlockIfLocked(body.conversation, body.user);
 					}
 
-					loadingMessages += 1;
+					hc.loadingMessages += 1;
 					prepareMessage(body, false);
 
 					if (conversation == body.conversation && body.user !== domain) {
@@ -2790,11 +2756,11 @@ function updateTypingViews() {
 
 function updateTypingStatus() {
 	if (lastTyped) {
-		if ((Date.now() - lastTyped) > typingDelay) {
-			imTyping = false;
+		if ((Date.now() - lastTyped) > settings.typingDelay) {
+			hc.imTyping = false;
 		}
 		else if ($(".input #message").is(":focus") && $(".input #message").val() !== "") {
-			imTyping = true;
+			hc.imTyping = true;
 		}
 	}
 }
@@ -2805,7 +2771,7 @@ function sendTyping() {
 		return;
 	}
 
-	if (!imTyping) {
+	if (!hc.imTyping) {
 		return;
 	}
 
@@ -2813,7 +2779,7 @@ function sendTyping() {
 	if (typingSent) {
 		var diff = Date.now() - typingSent;
 
-		if (diff >= typingSendDelay) {
+		if (diff >= settings.typingSendDelay) {
 			shouldSend = true;
 		}
 	}
@@ -2829,7 +2795,7 @@ function sendTyping() {
 		*/
 		typingSent = Date.now();
 		
-		let data = {
+		const data = {
 			action: "typing",
 			from: domain,
 			to: conversation
@@ -2905,7 +2871,7 @@ async function setKeys() {
 }
 
 function verifySession() {
-	let data = {
+	const data = {
 		action: "verifySession",
 		pubkey: JSON.stringify(keys.publicKeyJwk)
 	}
@@ -2952,7 +2918,7 @@ function tabComplete() {
 
 	options.sort();
 
-	let matches = options.filter(option => {
+	const matches = options.filter(option => {
 		option = String(option);
 
 		if (option.length) {
@@ -2966,49 +2932,40 @@ function tabComplete() {
 	}
 }
 
-function getBrowser() {
-	if (navigator.userAgent.indexOf("Chrome") != -1) {
-		return "chrome";
-	}
-	else if (navigator.userAgent.indexOf("Firefox") != -1) {
-		return "firefox";
-	}
-	else if (navigator.userAgent.indexOf("MSIE") != -1) {
-		return "ie";
-	}
-	else if (navigator.userAgent.indexOf("Edge") != -1) {
-		return "edge";
-	}
-	else if (navigator.userAgent.indexOf("Safari") != -1) {
-		return "safari";
-	}
-	else if (navigator.userAgent.indexOf("Opera") != -1) {
-		return "opera";
-	}
-	return "other";
-}
+function getBrowser() { 
+	const browsers = {
+		Chrome: "chrome",
+		Firefox: "firefox",
+		MSIE: "ie",
+		Edge: "edge",
+		safari: "safari",
+		Opera: "opera"
+	};
 
-function categoryForEmoji(emoji) {
-	var cat = false;
-	$.each(Object.keys(emojiCategories), (k, category) => {
-		let data = emojiCategories[category];
+	for (let browser in browsers) {
+		if (navigator.userAgent.indexOf(browser) != -1)
+			return browsers[browser];
+
+	};
+
+	return "other";
+};
+
+const categoryForEmoji = emoji => {
+	let cat = false;
+	Object.keys(emojiCategories).forEach(category => {
+		const data = emojiCategories[category];
 		if (data.includes(emoji.category)) {
 			cat = category;
 			return false;
-		}
+		};
 	});
 
-	if (cat) {
-		return cat;
-	}
+	return cat || false;
+};
 
-	return false;
-}
-
-function openConversationWith(name) {
-	if (nameForUserID(domain).locked) {
-		return;
-	}
+const openConversationWith = name => {
+	if (nameForUserID(domain).locked) return;
 
 	$(".popover[data-name=startConversation] input[name=domain]").val(name);
 	popover("startConversation");
@@ -3016,7 +2973,8 @@ function openConversationWith(name) {
 	setTimeout(() => {
 		$(".popover[data-name=startConversation] input[name=message]").focus();
 	}, 1);
-}
+};
+
 
 function setupNotifications() {
 	if ('Notification' in window && navigator.serviceWorker) {
@@ -3038,7 +2996,7 @@ function sendNotification(title, body, conversation) {
 	if ('Notification' in window && navigator.serviceWorker) {
 		if (Notification.permission == 'granted') {
 			navigator.serviceWorker.getRegistration().then(reg => {
-				notificationSound.play();
+				hc.notificationSound.play();
 
 				var options = {
 					body: replaceSpecialMessages(body, false),
@@ -3192,7 +3150,7 @@ async function signWithMetaMask(id, domain, code) {
 }
 
 async function verifySignature(id, signature, account=null) {
-	let data = {
+	const data = {
 		action: "verifySignature",
 		domain: id,
 		account: account,
@@ -3204,15 +3162,15 @@ async function verifySignature(id, signature, account=null) {
 
 function setActive(active) {
 	if (active) {
-		isActive = true;
+		hc.isActive = true;
 	}
 	else {
-		isActive = false;
+		hc.isActive = false;
 	}
 }
 
 function ping() {
-	let data = {
+	const data = {
 		action: "ping",
 		from: domain
 	};
@@ -3261,6 +3219,10 @@ function userFromName(name) {
 	return false;
 }
 
+const daemon = () => {
+
+};
+
 $(() => {
 	urlAction = window.location.hash.substr(1);
 
@@ -3273,9 +3235,9 @@ $(() => {
 		}
 	}
 
-	page = $("body").data("page");
+	hc.page = $("body").data("page");
 
-	if (page == "sync") {
+	if (hc.page == "sync") {
 		onLoad();
 	}
 	else {
@@ -3537,7 +3499,7 @@ $(() => {
 
 				$.each(attachments, (k, attachment) => {
 					let id = $(attachment).data("id");
-					let data = {
+					const data = {
 						hnschat: 1,
 						attachment: id
 					};
@@ -3826,7 +3788,7 @@ $(() => {
 				else {
 					checkName(domain, to).then(r => {
 						if (r.success) {
-							let data = {
+							const data = {
 								action: "startConversation",
 								from: domain,
 								to: to,
@@ -3876,7 +3838,7 @@ $(() => {
 					}
 					else {
 						if (bob.hash) {
-							let data = {
+							const data = {
 								hnschat: 1,
 								payment: bob.hash,
 								amount: value
@@ -3903,7 +3865,7 @@ $(() => {
 
 				localStorage.setItem("settings", JSON.stringify(settings));
 
-				let data = {
+				const data = {
 					action: "saveSettings",
 					domain: domain,
 					settings: {}
@@ -4250,7 +4212,7 @@ $(() => {
 			case "message":
 				let reacting = $(".messageRow .hover.visible").closest(".messageRow").data("id");
 				close();
-				let data = {
+				const data = {
 					action: "react",
 					conversation: conversation,
 					from: domain,
@@ -4267,7 +4229,7 @@ $(() => {
 		let reacting = target.closest(".messageRow").data("id");
 		let em = target.data("reaction");
 
-		let data = {
+		const data = {
 			action: "react",
 			conversation: conversation,
 			from: domain,
@@ -4376,31 +4338,27 @@ $(() => {
 	});
 
 	$("#messageHolder").on("scroll", e => {
-		let messageHolder = $("#messageHolder");
-		if (loadingMessages) {
-			return;
-		}
+		if (hc.loadingMessages) return;
+		const messageHolder = $("#messageHolder");
 
-		let height = messageHolder.outerHeight();
-		let scrollTop = messageHolder[0].scrollTop;
-		let scrollHeight = messageHolder[0].scrollHeight - messageHolder.height();
+		const height = messageHolder.outerHeight();
+		const scrollTop = messageHolder[0].scrollTop;
+		const scrollHeight = messageHolder[0].scrollHeight - messageHolder.height();
 
-		if ((scrollHeight - height) == 0) {
-			return;
-		}
+		if ((scrollHeight - height) === 0) return;
 
-		let calc = Math.floor(scrollHeight + scrollTop);
+		const calc = Math.floor(scrollHeight + scrollTop);
 		if (calc < 1) {
-			loadingMessages = 1;
-			let firstMessage = $("#messages > .messageRow[data-id]").first();
-			let firstMessageID = firstMessage.data("id");
+			hc.loadingMessages = 1;
+			const firstMessage = $("#messages > .messageRow[data-id]").first();
+			const firstMessageID = firstMessage.data("id");
 			if (firstMessageID) {
-				let options = {
+				const options = {
 					before: firstMessageID
-				}
+				};
 				loadMessages(conversation, options);
-			}
-		}
+			};
+		};
 	});
 
 	$(window).on("resize", () => {
