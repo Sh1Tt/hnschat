@@ -1,19 +1,23 @@
-const settings = {};
-settings.formatTime = "g:i A";
-settings.formatDate = "F jS Y";
-settings.typingDelay = 2000;
-settings.typingSendDelay = 1000;
-settings.loglevel = "debug";
-settings.theme = "dark";
-settings.notificationSound = `/assets/sound/pop`;
+const __settings = {};
+
+__settings.formatTime = "g:i A";
+__settings.formatDate = "F jS Y";
+__settings.typingDelay = 2000;
+__settings.typingSendDelay = 1000;
+__settings.loglevel = "debug";
+__settings.notificationSound = `/assets/sound/pop`;
 
 const hc = {};
+
+hc.key;
+hc.keys;
 hc.messages = [];
 hc.isActive = true;
-hc.notificationSound = new Audio(settings.notificationSound);
+hc.notificationSound = new Audio(__settings.notificationSound);
+hc.replying = false;
 
-let key;
-let keys;
+let socket, users,
+urlAction;
 
 var tld;
 var domain;
@@ -23,10 +27,6 @@ var started;
 var conversations;
 var conversation;
 
-let socket,
-users;
-
-var replying;
 var typingSent;
 var lastTyped;
 var typers = {};
@@ -35,12 +35,10 @@ var sync;
 
 var avatars = {};
 
-var unexpandedLinks = [];
+let unexpandedLinks = [];
 
 const host = window.location.host;
 const validDomains = ["https://hnschat", "https://hns.chat"];
-
-let urlAction;
 
 const commands = ["shrug", "me", "slap"];
 const actionString = "\x01ACTION ";
@@ -68,24 +66,24 @@ const isMobile = () => $(".header .left").css("display") === "flex";
 
 const log = input => {
 	const levels = ["debug", "info", "warn", "error", "verbose"];
-	const { loglevel } = settings;
+	const { loglevel } = __settings;
 	if (!levels.includes(loglevel)) return;
 	const output = typeof input === "object" ? JSON.stringify(input) : input;
-	if (loglevel === "verbose" 
-	|| loglevel === "debug" 
-	|| loglevel === "error"
+	if (loglevel === "verbose"
+		|| loglevel === "debug"
+		|| loglevel === "error"
 	) {
 		const ts = new Date().toLocaleTimeString();
 		console.log(`[${ts}] ${loglevel} - ${output}`);
-	} 
+	}
 	else {
 		console.log(output);
 	};
 };
 
-const rtrim = (str, chr) =>  str.replace(new RegExp(!chr ? '\\s+$' : chr+'+$'), '');
+const rtrim = (str, chr) => str.replace(new RegExp(!chr ? '\\s+$' : chr + '+$'), '');
 
-const ltrim = (str, chr) =>  str.replace(new RegExp(!chr ? '^\\s+' : '^'+chr+'+'), '');
+const ltrim = (str, chr) => str.replace(new RegExp(!chr ? '^\\s+' : '^' + chr + '+'), '');
 
 const api = async data => {
 	if (hc.key)
@@ -112,10 +110,10 @@ const upload = async (data, attachment) => await new Promise(resolve => {
 		cache: false,
 		contentType: false,
 		processData: false,
-		beforeSend: (e) => {},
+		beforeSend: (e) => { },
 		xhr: () => {
 			var p = $.ajaxSettings.xhr();
-			p.upload.onprogress = () => {}
+			p.upload.onprogress = () => { }
 			return p;
 		},
 		success: (response) => {
@@ -126,10 +124,10 @@ const upload = async (data, attachment) => await new Promise(resolve => {
 });
 
 const ws = (cmd, body) => {
-	socket.send(cmd+" "+JSON.stringify(body))
+	socket.send(cmd + " " + JSON.stringify(body))
 };
 
-const startSession = ()	=> {
+const startSession = () => {
 	if (hc.key) return;
 
 	const data = {
@@ -172,7 +170,7 @@ const addSLD = (sld, tld) => {
 		tld: toASCII(tld)
 	};
 
-	if (typeof invite !== "undefined" 
+	if (typeof invite !== "undefined"
 		&& invite.length
 	) {
 		data["invite"] = invite;
@@ -211,10 +209,10 @@ const markConversationUnreadIfNeeded = id => {
 	if (id !== conversation) {
 		const data = conversations[id];
 		if (data.unreadMessages) {
-			$("#conversations tr[data-id="+id+"]").addClass("unread");
+			$("#conversations tr[data-id=" + id + "]").addClass("unread");
 		}
 		if (data.unreadMentions) {
-			$("#conversations tr[data-id="+id+"]").addClass("mentions");
+			$("#conversations tr[data-id=" + id + "]").addClass("mentions");
 		}
 	};
 
@@ -256,7 +254,7 @@ const searchUsers = query => {
 
 function insertConversations() {
 	const sortedArray = Object.entries(conversations)
-		.sort((a,b) => (a[1]["latestMessage"].time > b[1]["latestMessage"].time) ? -1 : 1);
+		.sort((a, b) => (a[1]["latestMessage"].time > b[1]["latestMessage"].time) ? -1 : 1);
 
 	let sortedObject = {};
 	$(sortedArray).each((k, conversation) => {
@@ -274,7 +272,7 @@ function insertConversations() {
 		else {
 			const user = Object.keys(conversation.users)
 				.filter(user => user !== domain).join(", ");
-			
+
 			const name = conversation.users[user];
 			$("#conversations .private table").append(conversationRow(k, name));
 			updateAvatars();
@@ -312,7 +310,7 @@ function updateConversation(body) {
 	let conversation = body.conversation;
 	let latestMessage = conversations[conversation].latestMessage;
 
-	let row = $("#conversations .section table tr[data-id="+conversation+"]");
+	let row = $("#conversations .section table tr[data-id=" + conversation + "]");
 	if (row) {
 		let parent = row.parent();
 		row.remove();
@@ -327,7 +325,7 @@ function updateConversation(body) {
 		}
 
 		let message = latestMessage.message;
-		let subtitle = name+'<span class="decrypt">'+message+'</span>';
+		let subtitle = name + '<span class="decrypt">' + message + '</span>';
 		sub.html(subtitle);
 		parent.prepend(row);
 	}
@@ -336,111 +334,108 @@ function updateConversation(body) {
 	markConversationUnreadIfNeeded(conversation);
 }
 
-function updateUsers() {
-	if ($("#users .searching.shown").length) {
+const updateUsers = () => {
+	if ($("#users .searching.shown").length)
 		return;
-	}
 
 	$(".users table").empty();
 
-	if (!isGroup(conversation)) {
+	if (!isGroup(conversation))
 		return;
-	}
 
-	var unlocked = [];
-	let conversationUsers = conversations[conversation].users;
+	let unlocked = [];
+
+	const conversationUsers = conversations[conversation].users;
 	$.each(Object.keys(conversationUsers), (k, id) => {
-		let filtered = users.filter(u => {
-			return u.id == id;
-		});
+		const filtered = users.filter(u => u.id == id);
 
 		if (filtered.length) {
 			if (!filtered[0].locked) {
-				let firstUser = filtered[0];
+				const firstUser = filtered[0];
 				conversations[conversation].users[firstUser.id] = { domain: firstUser.domain };
-				
-				let theUser = {
+
+				const theUser = {
 					id: firstUser.id,
 					domain: firstUser.domain
 				};
 				unlocked.push(theUser);
-			}
-		}
+			};
+		};
 	});
-	
+
 	$.each(unlocked, (k, user) => {
-		let row = userRow(user);
+		const row = userRow(user);
 		$(".users table").append(row);
 	});
 
 	$("#users #count").html(unlocked.length.toLocaleString("en-US"));
 
 	updateAvatars();
-}
+};
 
-function updateAvatars() {
+const updateAvatars = () => {
 	$.each($(".favicon:not(.loaded)"), (k, e) => {
-		let favicon = $(e);
-		favicon.addClass("loaded");
-		let d = favicon.data("domain");
-		let id = favicon.data("id");
-		let user = nameForUserID(id);
+		const favicon = $(e);
+		const _id = favicon.data("id");
+		const _user = nameForUserID(_id);
 
-		if (user.id) {
-			if (Object.keys(avatars).includes(id)) {
-				if (avatars[id]) {
-					let original = $("#avatars .favicon[data-id="+id+"]");
+		favicon.addClass("loaded");
+
+		if (_user.id) {
+			if (Object.keys(avatars).includes(_id)) {
+				if (avatars[_id]) {
+					const original = $("#avatars .favicon[data-id=" + _id + "]");
 					if (original.length) {
-						let clone = original[0].cloneNode(true);
-						let parent = favicon.parent();
+						const clone = original[0].cloneNode(true);
+						const parent = favicon.parent();
 						favicon.remove();
 						parent.append(clone);
 						parent.find(".fallback").html('');
-						updateOtherAvatars(id);
-					}
-				}
+						updateOtherAvatars(_id);
+					};
+				};
 			}
 			else {
-				avatars[id] = false;
-				var link = user.avatar;
+				avatars[_id] = false;
+				let link = _user.avatar;
 				if (link) {
-					link = "/avatar/"+user.id;
-					let img = $('<img class="loading" />');
-					img.attr("src", link).on("load", i => {
+					const url = "/avatar/" + _user.id;
+					const img = $('<img class="loading" />');
+					img.attr("src", url).on("load", i => {
 						let im = $(i.target);
-						favicon.css("background-image", "url("+link+")");
+						favicon.css("background-image", "url(" + url + ")");
 						favicon.parent().find(".fallback").html('');
 						im.remove();
-						avatars[id] = link;
+						avatars[_id] = url;
 						let clone = favicon[0].cloneNode(true);
 						$("#avatars").append(clone);
-						updateOtherAvatars(user.id);
+						updateOtherAvatars(_user.id);
 					}).on("error", r => {
 						$(r.target).remove();
-						avatars[id] = false;
-					});  
+						avatars[_id] = false;
+					});
 					$("html").append(img);
 				}
 				else {
-					avatars[id] = false;
-				}
-			}
-		}
+					avatars[_id] = false;
+				};
+			};
+		};
 	});
-}
+};
 
 function updateOtherAvatars(id) {
 	if (avatars[id]) {
-		let avatars = [
-			$("#conversations .section.private .avatar .favicon[data-id="+id+"].loaded"),
-			$("#messages .messageRow .avatar .favicon[data-id="+id+"].loaded"),
-			$("#users .user .avatar .favicon[data-id="+id+"].loaded")
+		const _avatars = [
+			$("#conversations .section.private .avatar .favicon[data-id=" + id + "].loaded"),
+			$("#messages .messageRow .avatar .favicon[data-id=" + id + "].loaded"),
+			$("#users .user .avatar .favicon[data-id=" + id + "].loaded")
 		];
 
-		$.each(avatars, (k, avatar) => {
+		$.each(_avatars, (k, avatar) => {
 			if (avatar.length) {
 				if (avatar.css("background-image") === "none" || !avatar.css("background-image")) {
-					let original = $("#avatars .favicon[data-id="+id+"]");
+					let original = $("#avatars .favicon[data-id=" + id + "]");
 					if (original.length) {
 						let clone = original[0].cloneNode(true);
 						let parent = avatar.parent();
@@ -451,8 +446,8 @@ function updateOtherAvatars(id) {
 				}
 			}
 		});
-	}
-}
+	};
+};
 
 const makeSecret = async k => await new Promise(resolve => {
 	const otherUser = getOtherUser(k);
@@ -476,7 +471,7 @@ function getUsers() {
 	};
 
 	return api(data);
-}
+};
 
 function loadConversations() {
 	hc.loadingConversations = true;
@@ -491,7 +486,7 @@ function loadConversations() {
 			conversations = r.conversations
 
 			conversation = Object.keys(conversations).filter(c => {
-			    return conversations[c].group && conversations[c].name === "general";
+				return conversations[c].group && conversations[c].name === "general";
 			});
 			updateUsers();
 
@@ -545,7 +540,7 @@ async function setupConversations() {
 			}
 		});
 	});
-	
+
 	return await output;
 }
 
@@ -558,7 +553,7 @@ function getConversations(domain) {
 	return api(data);
 }
 
-function loadMessages(conversation, options={}) {
+function loadMessages(conversation, options = {}) {
 	hc.fetchingMessages = true;
 	getMessages(conversation, options).then(r => {
 		$("#chats .content .needSLD").remove();
@@ -600,7 +595,7 @@ function loadMessages(conversation, options={}) {
 					resolve();
 				}
 				else if (r.needSLD) {
-					message = "#"+tld+" is a private community for owners of a ."+tld+" only.";
+					message = "#" + tld + " is a private community for owners of a ." + tld + " only.";
 
 					checkTLD(tld).then(r => {
 						var msg = "";
@@ -616,10 +611,10 @@ function loadMessages(conversation, options={}) {
 							}
 
 							if (r.owned) {
-								$.each(r.owned, (k,o) => {
+								$.each(r.owned, (k, o) => {
 									let button = $('<div class="button" />');
 									let name = toUnicode(nameForUserID(o).domain);
-									button.html("Switch to "+name);
+									button.html("Switch to " + name);
 									button.attr("data-id", o);
 									button.attr("data-action", "switchName");
 									buttons.push(button);
@@ -627,7 +622,7 @@ function loadMessages(conversation, options={}) {
 							}
 
 							if (msg.length) {
-								button.html(msg+tld);
+								button.html(msg + tld);
 								button.attr("data-tld", tld);
 							}
 						}
@@ -675,7 +670,7 @@ function getMessages(conversation, options) {
 	return api(data);
 }
 
-function fixScroll(before=false, row=false) {
+function fixScroll(before = false, row = false) {
 	var fix = false;
 	switch (browser) {
 		case "safari":
@@ -738,7 +733,7 @@ function setupEmojiView(e, sender) {
 
 		if (!row.length) {
 			let id = target.closest(".body").find("span.message").data("id");
-			row = $("#messages").find(".messageRow[data-id="+id+"]");
+			row = $("#messages").find(".messageRow[data-id=" + id + "]");
 		}
 
 		let hover = row.find(".hover");
@@ -769,7 +764,7 @@ function setupEmojiView(e, sender) {
 				section.addClass("hidden");
 				title.addClass("hidden");
 			}
-			
+
 			menu.find(".body .grid").append(section);
 		});
 
@@ -778,7 +773,7 @@ function setupEmojiView(e, sender) {
 			let item = $('<div class="emoji" />');
 			item.attr("data-aliases", JSON.stringify(emoji.aliases));
 			item.html(emoji.emoji);
-			menu.find(".body .grid .section[data-name="+cat+"] .emojis").append(item);
+			menu.find(".body .grid .section[data-name=" + cat + "] .emojis").append(item);
 		});
 
 		menu.addClass("loaded");
@@ -803,7 +798,7 @@ function nameForUserInConversation(conversation, user) {
 	return name;
 }
 
-function replaceIds(message, link=true) {
+function replaceIds(message, link = true) {
 	var output = message;
 
 	let r = new regex(/\@(?<name>[a-zA-Z0-9]{16})/, 'gm');
@@ -816,9 +811,9 @@ function replaceIds(message, link=true) {
 		if (nameForUserID(id)) {
 			let name = toUnicode(nameForUserID(id).domain);
 
-			var replace = '@'+name+'/';
+			var replace = '@' + name + '/';
 			if (link) {
-				replace = '<div class="inline nick">@'+name+'/</div>';
+				replace = '<div class="inline nick">@' + name + '/</div>';
 			}
 
 			output = replaceRange(output, start, end, replace);
@@ -828,29 +823,26 @@ function replaceIds(message, link=true) {
 	return output;
 }
 
-function replaceNames(message) {
-	var output = message;
-
-	let r = new RegExp(`\@(?<name>[^ ]+?\/)`);
+const replaceNames = message => {
+	const r = new RegExp(`\@(?<name>[^ ]+?\/)`);
+	let output = message;
 	while ((result = r.exec(output)) !== null) {
-		var name = result.groups.name;
-		var start = result.index;
-		var end = (result.index + name.length + 1);
+		const name = result.groups.name;
+		const start = result.index;
+		const end = (result.index + name.length + 1);
 
-		let filtered = users.filter(user => {
-			return toUnicode(user.domain) == rtrim(name, "/") && !user.locked;
-		});
+		const filtered = users.filter(user => toUnicode(user.domain) == rtrim(name, "/") && !user.locked);
 
 		if (filtered) {
-			let id = filtered[0].id;
-			
-			let replace = "@"+id;
+			const id = filtered[0].id;
+			const replace = `@${id}`;
+
 			output = replaceRange(output, start, end, replace);
-		}
-	}
+		};
+	};
 
 	return output;
-}
+};
 
 const messageBody = async message => await new Promise(resolve => {
 	if (isGroup(message.conversation)) {
@@ -865,7 +857,7 @@ const messageBody = async message => await new Promise(resolve => {
 	};
 });
 
-const prepareMessage = (message, old = true, before = false) => {
+const prepareMessage = ( message, old = true, before = false ) => {
 	messageBody(message)
 		.then(theMessage => {
 			let push = false;
@@ -879,11 +871,11 @@ const prepareMessage = (message, old = true, before = false) => {
 				hc.messages.push(message);
 			};
 
-			const messageDate = new Date(message.time * 1000).format(settings.formatDate);
-			const messageTime = new Date(message.time * 1000).format(settings.formatTime);
-			
+			const messageDate = new Date(message.time * 1000).format(__settings.formatDate);
+			const messageTime = new Date(message.time * 1000).format(__settings.formatTime);
+
 			let messageSender = "";
-		
+
 			if (message.from) {
 				messageSender = message.from;
 			}
@@ -891,7 +883,7 @@ const prepareMessage = (message, old = true, before = false) => {
 				messageSender = message.user;
 			};
 
-			let messageUser = nameForUserInConversation(message.conversation, messageSender);
+			const messageUser = nameForUserInConversation(message.conversation, messageSender);
 
 			if (hc.fetchingMessages)
 				return;
@@ -901,35 +893,34 @@ const prepareMessage = (message, old = true, before = false) => {
 
 				if (!hc.isActive)
 					push = true;
-					
+
 			}
 			else {
 				push = true;
 			};
 
 			if (
-				!old 
-				&& push 
+				!old
+				&& push
 				&& messageSender !== domain
 			) {
 				const replaced = replaceIds(theMessage, false);
 				if (!isGroup(message.conversation)) {
 					sendNotification(messageUser, replaced, message.conversation);
 				}
-				else if (theMessage.includes("@"+domain)) {
-					sendNotification(messageUser+" - #"+conversations[message.conversation].name, replaced, message.conversation);
+				else if (theMessage.includes("@" + domain)) {
+					sendNotification(messageUser + " - #" + conversations[message.conversation].name, replaced, message.conversation);
 				};
 			}
-	});
+		});
 }
 
 function insertMessage(message, theMessage, before, messageSender, messageUser, messageDate, messageTime) {
-	let existingMessage = $("#messages > .messageRow[data-id="+message.id+"]");
-	if (existingMessage.length) {
+	const existingMessage = $("#messages > .messageRow[data-id=" + message.id + "]");
+	if (existingMessage.length)
 		return;
-	}
 
-	let messageHolder = $("#messages");
+	const messageHolder = $("#messages");
 
 	const messageRow = $('<div class="messageRow" />');
 	const contents = $('<div class="contents" />');
@@ -951,42 +942,42 @@ function insertMessage(message, theMessage, before, messageSender, messageUser, 
 	const signature = $('<div class="signature" />');
 	const user = $('<div class="user" />');
 	const lastUser = $('<div class="user" />');
+
 	time.html(messageTime);
-	user.html(messageUser+"/");
+	user.html(messageUser + "/");
 	messageRow.attr("data-id", message.id);
 	messageRow.attr("data-time", message.time);
 	messageRow.attr("data-sender", messageSender);
 	messageRow.attr("title", messageDate);
-	if (messageSender == domain || message.user == domain) {
+	if (messageSender == domain 
+	|| message.user == domain
+	)
 		messageRow.addClass("self");
-	}
 
 	if (message.replying) {
 		messageRow.addClass("replying");
 
-		let reply = $('<div class="reply" />');
-		let replyLine = $('<div class="line" />');
-		let replyContents = $('<div class="contents" />');
-		let replyUser = $('<div class="user" />');
-		let replyBody = $('<div class="body" />');
+		const reply = $('<div class="reply" />');
+		const replyLine = $('<div class="line" />');
+		const replyContents = $('<div class="contents" />');
+		const replyUser = $('<div class="user" />');
+		const replyBody = $('<div class="body" />');
 
-		if (domain == message.replying.user) {
+		if (domain == message.replying.user)
 			messageRow.addClass("mention");
-		}
 
 		let replyUserName = nameForUserInConversation(message.conversation, message.replying.user);
-		replyUser.html(replyUserName+"/");
+		replyUser.html(replyUserName + "/");
 
 		messageBody(message.replying).then(replyMessage => {
-			var replyMsg = decodeEntities(decodeEntities(replyMessage));
+			let replyMsg = decodeEntities(decodeEntities(replyMessage));
 			replyMsg = replaceIds(replyMsg, false);
 			replyMsg = replaceSpecialMessages(replyMsg, false);
 			replyBody.attr("title", replyMsg);
 			replyBody.html(htmlEntities(replyMsg));
 
-			if (isAction(replyMessage)) {
+			if (isAction(replyMessage))
 				replyBody.addClass("action");
-			}
 
 			replyContents.prepend(replyUser);
 			replyContents.append(replyBody);
@@ -994,26 +985,24 @@ function insertMessage(message, theMessage, before, messageSender, messageUser, 
 			reply.append(replyContents);
 			messageRow.prepend(reply);
 		});
-	}
+	};
 
 	if (isAction(theMessage)) {
 		messageRow.addClass("action");
-
 		theMessage = theMessage.substring(8);
-	}
+	};
 
-	var emojiMsg = decodeEntities(decodeEntities(theMessage));
-	let charArray = Array.from(emojiMsg);
-	let firstThree = charArray.slice(0, 3);
-	var isEmojis = true;
+	const emojiMsg = decodeEntities(decodeEntities(theMessage));
+	const charArray = Array.from(emojiMsg);
+	const firstThree = charArray.slice(0, 3);
+	let isEmojis = true;
 	$.each(firstThree, (k, char) => {
 		if (!isCharEmoji(char)) {
 			isEmojis = false;
 		}
 	});
-	if (isEmojis) {
+	if (isEmojis)
 		messageRow.addClass("emojis");
-	}
 
 	if (message.signature && !message.signed) {
 		row.addClass("signed fail");
@@ -1024,37 +1013,38 @@ function insertMessage(message, theMessage, before, messageSender, messageUser, 
 		row.addClass("signed");
 		row.attr("data-signature", message.signature);
 		signature.html(message.signature);
-	}
+	};
 
-	var attachment = false;
+	let hasAttachment = false;
 	try {
-		let decoded = decodeEntities(decodeEntities(theMessage));
-		let json = JSON.parse(decoded);
-		
+		const decoded = decodeEntities(decodeEntities(theMessage));
+		const json = JSON.parse(decoded);
+
 		if (json.hnschat) {
 			if (json.attachment) {
-				attachment = true;
-				let link = "https://"+host+"/uploads/"+json.attachment;
-				let a = $("<a />");
+				const attachment = json.attachment;
+				hasAttachment = true;
+				const src = `https://${host}/uploads/${attachment}`;
+				const a = $("<a />");
 				a.attr("href", link);
 				a.attr("target", "_blank");
-				let image = $('<img />');
-				image.attr("src", link);
+				const image = $('<img />');
+				image.attr("src", src);
 				a.append(image);
 				body.append(a);
 				row.addClass("image");
 			}
 			else if (json.payment) {
-				attachment = true;
+				hasAttachment = true;
 
 				let link = "/assets/img/icon-512x512";
-				let txLink = "https://niami.io/tx/"+json.payment;
+				let txLink = "https://niami.io/tx/" + json.payment;
 				let a = $("<a />");
 				a.attr("href", txLink);
 				a.attr("target", "_blank");
 				let image = $('<img />');
 				image.attr("src", link);
-				
+
 				let holder = $('<div class="imageHolder" />');
 				holder.append(image);
 
@@ -1072,16 +1062,13 @@ function insertMessage(message, theMessage, before, messageSender, messageUser, 
 			}
 		}
 	}
-	catch (error) {}
+	catch (error) { }
 
-	if (!attachment) {
-		if (isGroup(message.conversation)) {
-			body.html(theMessage);
-		}
-		else {
-			body.html(htmlEntities(htmlEntities(theMessage)));
-		}
-	}
+	if (!hasAttachment) {
+		body.html(isGroup(message.conversation) ? theMessage 
+		: htmlEntities(htmlEntities(theMessage))
+		);
+	};
 
 	actions.append(reply);
 	actions.append(emoji);
@@ -1094,12 +1081,14 @@ function insertMessage(message, theMessage, before, messageSender, messageUser, 
 
 	hover.append(time);
 	hover.append(actions);
+
 	if (messageRow.hasClass("self")) {
 		holder.prepend(hover);
 	}
 	else {
 		holder.append(hover);
-	}
+	};
+
 	contents.append(holder);
 	contents.append(holder2);
 
@@ -1112,16 +1101,16 @@ function insertMessage(message, theMessage, before, messageSender, messageUser, 
 	}
 	else {
 		messageHolder.append(messageRow);
-	}
+	};
 
 	if (message.firstMessage) {
-		var infoRow = $('<div class="messageRow informational date last" />');
+		const infoRow = $('<div class="messageRow informational date last" />');
 		infoRow.html(messageDate);
 		messageHolder.prepend(infoRow);
 		contents.prepend(user);
 		contents.prepend(messageAvatar(messageSender, messageUser));
 		stylizeMessage(infoRow);
-	}
+	};
 
 	messageRow.append(contents);
 
@@ -1131,11 +1120,10 @@ function insertMessage(message, theMessage, before, messageSender, messageUser, 
 		hc.loadingMessages -= 1;
 	}, 1);
 
-	if (!attachment) {
+	if (!hasAttachment)
 		linkifyMessage(body);
-	}
 
-	let msg = hc.messages.filter(m => message.id === m.id);
+	const msg = hc.messages.filter(m => message.id === m.id);
 	if (msg.length)
 		updateReactions(msg[0]);
 
@@ -1153,26 +1141,26 @@ function stylizeMessage(message) {
 
 	const messageID = message.data("id");
 	const messageTime = message.data("time");
-	const messageDate = new Date(messageTime * 1000).format(settings.formatDate);
+	const messageDate = new Date(messageTime * 1000).format(__settings.formatDate);
 	const contents = message.find(".contents");
 	const messageSender = message.data("sender");
-	
+
 	let messageUser;
-	
+
 	const previousMessage = message.prev();
 	const previousMessageTime = previousMessage.data("time");
-	const previousMessageDate = new Date(previousMessageTime * 1000).format(settings.formatDate);
+	const previousMessageDate = new Date(previousMessageTime * 1000).format(__settings.formatDate);
 	const previousMessageSender = previousMessage.data("sender");
 
 	const nextMessage = message.next();
 	const nextMessageTime = nextMessage.data("time");
-	const nextMessageDate = new Date(nextMessageTime * 1000).format(settings.formatDate);
+	const nextMessageDate = new Date(nextMessageTime * 1000).format(__settings.formatDate);
 	const nextMessageSender = nextMessage.data("sender");
-	
+
 	let nextMessageUser;
 
 	const __ = {};
-	
+
 	__.isFirst = false;
 	__.isLast = false;
 
@@ -1188,52 +1176,68 @@ function stylizeMessage(message) {
 	__.addNextUser = false;
 	__.removeUser = false;
 	__.removeNextUser = false;
-	
+
 	__.prependDate = false;
 	__.appendDate = false;
 
-	if (firstMessageID == messageID)
-		__.isFirst = true;
+	switch (true) {
+		case firstMessageID === messageID:
+			__.isFirst = true;
+			break;
+		
+		case lastMessageID === messageID:
+			__.isLast = true;
+			break;
+		
+		case message.hasClass("replying"):
+			__.isReply = true;
+			break;
 
-	if (lastMessageID == messageID)
-		__.isLast = true;
+		case message.hasClass("informational"):
+			__.isInformational = true;
+			break;
+		
+		case message.hasClass("date"):
+			__.isDate = true;
+			break;
+		
+		case message.hasClass("action"):
+			__.isAction = true;
+			break;
+		
+		case nextMessage.length:
+			__.before = true;
+			break;
 
-	if (message.hasClass("replying"))
-		__.isReply = true;
+		case (__.isFirst || __.isReply):
+			__.addUser = true;
+			break;
 
-	if (message.hasClass("informational"))
-		__.isInformational = true;
+		case !__.before:
+			if (!__.isDate 
+			&& previousMessage.length 
+			&& messageDate !== previousMessageDate
+			)
+				__.prependDate = true;
+			break;
 
-	if (message.hasClass("date"))
-		__.isDate = true;
-
-	if (message.hasClass("action"))
-		__.isAction = true;
-
-	if (nextMessage.length)
-		__.before = true;
-
-	if (__.isFirst || __.isReply)
-		__.addUser = true;
-
-	if (!__.before) {
-		if (!__.isDate && previousMessage.length && messageDate !== previousMessageDate && !previousMessage.hasClass("date")) {
-			__.prependDate = true;
-		}
-	}
-	else {
-		if (!__.isDate && nextMessage.length && messageDate !== nextMessageDate && !nextMessage.hasClass("date")) {
-			__.appendDate = true;
-		}
+		default:
+			if (!__.isDate
+			&& nextMessage.length 
+			&& messageDate !== nextMessageDate 
+			&& !nextMessage.hasClass("date")
+			)
+				__.appendDate = true;
+			break;
 	};
 
 	if (__.isDate) {
 		previousMessage.addClass("last");
 		message.addClass("first last");
 
-		if (nextMessage.length) {
+		if (nextMessage.length)
 			__.addNextUser = true;
-		}
+
 	}
 	else {
 		let timeDifference;
@@ -1244,11 +1248,11 @@ function stylizeMessage(message) {
 			message.addClass("first");
 		}
 		else {
-			message.addClass("last");	
+			message.addClass("last");
 		};
 
-		if (__.isFirst 
-		|| __.isReply
+		if (__.isFirst
+			|| __.isReply
 		)
 			message.addClass("first");
 
@@ -1258,7 +1262,7 @@ function stylizeMessage(message) {
 		if (previousMessage.length) {
 			timeDifference = messageTime - previousMessageTime;
 
-			if (timeDifference > 60 
+			if (timeDifference > 60
 			|| previousMessageSender !== messageSender
 			) {
 				previousMessage.addClass("last");
@@ -1271,8 +1275,8 @@ function stylizeMessage(message) {
 		};
 
 		if (timeDifference < 60
-		&& previousMessageSender == messageSender
-		&& !message.hasClass("replying")
+			&& previousMessageSender == messageSender
+			&& !message.hasClass("replying")
 		)
 			previousMessage.removeClass("last");
 
@@ -1285,24 +1289,24 @@ function stylizeMessage(message) {
 			if (timeDifference > 60) {
 				nextMessage.addClass("first");
 				__.addNextUser = true;
-			}
+			};
 
 			if (nextMessage.hasClass("first")) {
 				message.addClass("last");
-			}
+			};
 		};
 
-		if (timeDifference < 60 
-		&& nextMessageSender == messageSender 
-		&& !nextMessage.hasClass("replying")
+		if (timeDifference < 60
+			&& nextMessageSender == messageSender
+			&& !nextMessage.hasClass("replying")
 		)
 			__.removeNextUser = true;
-		
+
 		switch (true) {
 			case __.addUser:
 				if (!contents.find(".user").length) {
 					const user = $('<div class="user" />');
-					user.html(messageUser+"/");
+					user.html(messageUser + "/");
 					contents.prepend(user);
 					contents.prepend(messageAvatar(messageSender, messageUser));
 				};
@@ -1313,28 +1317,28 @@ function stylizeMessage(message) {
 				message.find(".contents .user").remove();
 				message.find(".contents .avatar").remove();
 				break;
-		
+
 			case __.removeNextUser:
 				message.removeClass("last");
 				nextMessage.removeClass("first");
 				nextMessage.find(".contents .user").remove();
 				nextMessage.find(".contents .avatar").remove();
 				break;
-				
+
 			case __.prependDate:
 				let infoRow = $('<div class="messageRow informational date last" />');
 				infoRow.html(messageDate);
 				infoRow.insertBefore(message);
 				stylizeMessage(infoRow);
 				break;
-			
+
 			case __.appendDate:
 				let infoRow = $('<div class="messageRow informational date last" />');
 				infoRow.html(nextMessageDate);
 				infoRow.insertAfter(message);
 				stylizeMessage(infoRow);
 				break;
-			
+
 			default:
 				break;
 		};
@@ -1344,7 +1348,7 @@ function stylizeMessage(message) {
 		if (!nextMessage.find(".contents .user").length) {
 			nextMessageUser = nameForUserInConversation(conversation, nextMessageSender);
 			let user = $('<div class="user" />');
-			user.html(nextMessageUser+"/");
+			user.html(nextMessageUser + "/");
 			nextMessage.addClass("first");
 			nextMessage.find(".contents").prepend(user);
 			nextMessage.find(".contents").prepend(messageAvatar(nextMessageSender, nextMessageUser));
@@ -1356,8 +1360,8 @@ function stylizeMessage(message) {
 
 const replaceRange = (s, start, end, substitute) => {
 	const before = s.substr(0, start);
-	const after = s.substr(end, (s.length -end));
-	return before+substitute+after;
+	const after = s.substr(end, (s.length - end));
+	return before + substitute + after;
 };
 
 class regex extends RegExp {
@@ -1365,7 +1369,7 @@ class regex extends RegExp {
 		const result = RegExp.prototype[Symbol.matchAll].call(this, str);
 		if (!result)
 			return null;
-		
+
 		return Array.from(result);
 	};
 };
@@ -1373,31 +1377,33 @@ class regex extends RegExp {
 const isIn = (type, string, index, length) => {
 	let result = false;
 
-	switch (type) {
-		case "link":
-			const isInRegex = new regex(linkRegex, 'gim');
-			break;
-	}
+	// switch (type) {
+	// 	case "link":
+	// 		const isInRegex = new regex(linkRegex, 'gim');
+	// 		break;
+	// }
+	const isInRegex = new regex(linkRegex, 'gim');
 
-	const matches = string.matchAll(isInRegex).reverse();
-	matches.forEach(m => {
-		const link = m[0];
-		const start = m.index;
-		const end = m.index + link.length;
-		
-		if (index >= start && index < end)
-			result = true;
+	string.matchAll(isInRegex)
+		.reverse()
+		.forEach(m => {
+			const link = m[0];
+			const start = m.index;
+			const end = m.index + link.length;
 
-	});
+			if (index >= start && index < end)
+				result = true;
+
+		});
 
 	return result;
-}
+};
 
 const mentionsMe = message => {
 	const r = new regex(/\@(?<name>[a-zA-Z0-9]{16})/, 'gm');
 	const matches = message.matchAll(r);
 	return matches.filter(m => domain === m.groups.name).length > 0;
-}
+};
 
 const linkifyMessage = element => {
 	let output = element.text();
@@ -1405,10 +1411,10 @@ const linkifyMessage = element => {
 	links.forEach(link => {
 		let href = link.string;
 		if (link.isEmail) {
-			href = "mailto:"+href;
+			href = "mailto:" + href;
 		}
 		else if (link.isURL && href.substring(0, 8) !== "https://" && href.substring(0, 7) !== "http://") {
-			href = "http://"+href;
+			href = "http://" + href;
 		};
 		const replace = `<a class="inline link" href="${href}" target="_blank">${link.string}</a>`;
 		output = replaceRange(output, link.start, link.end, replace);
@@ -1430,7 +1436,7 @@ function expandLinks(element) {
 
 	if (links.length) {
 		let link = links[0].href;
-		
+
 		const data = {
 			action: "getMetaTags",
 			url: link
@@ -1439,7 +1445,7 @@ function expandLinks(element) {
 		api(data).then(r => {
 			if (r.tags && Object.keys(r.tags).length) {
 				if (Object.keys(r.tags).includes("title")) {
-					let a = $('<a href="'+link+'" target="_blank" />');
+					let a = $('<a href="' + link + '" target="_blank" />');
 					let div = $('<div class="preview" />');
 					let image = $('<img class="image" />');
 					let title = $('<div class="title" />');
@@ -1478,7 +1484,7 @@ function expandLinks(element) {
 					setTimeout(() => {
 						expandLinks(element);
 					}, 1000)
-					
+
 				}
 			}
 		});
@@ -1507,7 +1513,7 @@ const encryptIfNeeded = async (conversation, message, dkey) => await new Promise
 	};
 });
 
-function sendMessage(conversation, message, signature=false) {
+function sendMessage(conversation, message, signature = false) {
 	let dkey = conversations[conversation].key || null;
 	let theMessage = message;
 
@@ -1518,13 +1524,13 @@ function sendMessage(conversation, message, signature=false) {
 			let command = split[0];
 			split.shift();
 			let body = split.join(" ");
-			
+
 			switch (command) {
 				case "me":
 					if (!body.length)
 						return;
 
-					theMessage = actionString+body;
+					theMessage = actionString + body;
 					break;
 
 				case "shrug":
@@ -1536,22 +1542,22 @@ function sendMessage(conversation, message, signature=false) {
 						return;
 
 					let who = rtrim(split[0], "[/ ]");
-					
+
 					const filtered = Object.keys(conversations[conversation].users)
 						.filter(k => who.toLowerCase() === nameForUserID(k).domain.toLowerCase());
 
-					if (!filtered.length) 
+					if (!filtered.length)
 						return;
 
 					who = nameForUserID(filtered[0]).domain;
-					theMessage =  `${actionString} slaps @${who}/ around a bit with a large trout`;
+					theMessage = `${actionString} slaps @${who}/ around a bit with a large trout`;
 					break;
 
 				default:
 					return;
 			};
 		}
-		else if (message.length > 1 
+		else if (message.length > 1
 			&& message[1] == "/"
 		) {
 			theMessage = theMessage.substring(1);
@@ -1559,7 +1565,7 @@ function sendMessage(conversation, message, signature=false) {
 	};
 
 	theMessage = replaceNames(theMessage);
-	
+
 	encryptIfNeeded(conversation, theMessage, dkey).then(m => {
 		const data = {
 			action: "sendMessage",
@@ -1568,9 +1574,9 @@ function sendMessage(conversation, message, signature=false) {
 			message: m
 		};
 
-		if (replying) {
-			data["replying"] = replying.message;
-			replying = false;
+		if (hc.replying) {
+			data["replying"] = hc.replying.message;
+			hc.replying = false;
 			updateReplying();
 		}
 
@@ -1596,12 +1602,12 @@ function markSeen(id) {
 
 async function createConversation(conversation) {
 	conversations[conversation.id] = conversation;
-	
+
 	let output = new Promise(resolve => {
 		let name = getOtherUser(conversation.id);
 		if (name) {
 			makeSecret(conversation.id).then(() => {
-				$("#conversations .private table tr[data-id="+conversation.id+"]").remove();
+				$("#conversations .private table tr[data-id=" + conversation.id + "]").remove();
 				$("#conversations .private table").prepend(conversationRow(conversation.id, name));
 				updateAvatars();
 				resolve();
@@ -1635,11 +1641,11 @@ function sizeInput() {
 			height = 200;
 		}
 
-		input.css("height", height+"px");
+		input.css("height", height + "px");
 	}
 }
 
-function inputEnabled(bool, reason=false) {
+function inputEnabled(bool, reason = false) {
 	var div;
 
 	if (reason) {
@@ -1673,13 +1679,13 @@ function inputEnabled(bool, reason=false) {
 		$(".inputHolder div:not(.input)").removeClass("shown");
 		$(".input #message").attr("disabled", true);
 		$(".input").addClass("hidden");
-		$(".inputHolder "+div).addClass("shown");
+		$(".inputHolder " + div).addClass("shown");
 	}
 }
 
 function updateActiveConversation(id) {
 	$("#conversations tr.active").removeClass("active");
-	$("#conversations tr[data-id="+id+"]").addClass("active");
+	$("#conversations tr[data-id=" + id + "]").addClass("active");
 }
 
 function messageTabForConversation(id) {
@@ -1694,8 +1700,8 @@ function messageTabForConversation(id) {
 function switchMessageTab(tab) {
 	$("#conversations .sections .section").removeClass("shown");
 	$("#conversations .tabs .tab").removeClass("active");
-	$("#conversations .sections .section."+tab).addClass("shown");
-	$("#conversations .tabs .tab[data-tab="+tab+"]").addClass("active");
+	$("#conversations .sections .section." + tab).addClass("shown");
+	$("#conversations .tabs .tab[data-tab=" + tab + "]").addClass("active");
 }
 
 function updateMessageTabs() {
@@ -1737,18 +1743,18 @@ function updateMessageTabs() {
 	}
 }
 
-function activeConversation(id){
+function activeConversation(id) {
 	updateActiveConversation(id);
 
-	$("#conversations tr[data-id="+id+"]").removeClass("unread");
-	$("#conversations tr[data-id="+id+"]").removeClass("mentions");
+	$("#conversations tr[data-id=" + id + "]").removeClass("unread");
+	$("#conversations tr[data-id=" + id + "]").removeClass("mentions");
 
 	$(".input #message").val('');
 
 	if (nameForUserID(domain).locked) {
 		inputEnabled(false, "verify");
 	}
-	else if ($("#conversations tr[data-id="+id+"]").hasClass("locked")) {
+	else if ($("#conversations tr[data-id=" + id + "]").hasClass("locked")) {
 		inputEnabled(false, "locked");
 	}
 	else {
@@ -1783,7 +1789,7 @@ function activeConversation(id){
 	$("#chats .content .needSLD").remove();
 	hc.messages = [];
 	unexpandedLinks = [];
-	replying = false;
+	hc.replying = false;
 	updateReplying();
 	close();
 
@@ -1794,50 +1800,39 @@ function activeConversation(id){
 	updateUsers();
 }
 
-function getOtherUserID(id) {
-	let conversation = conversations[id];
-
-	let user = Object.keys(conversation.users).filter(user => {
-		return user !== domain;
-	}).join(", ");
+const getOtherUserID = id => {
+	const conversation = conversations[id];
+	const user = Object.keys(conversation.users)
+		.filter(user => user !== domain)
+		.join(", ");
 
 	return user;
-}
+};
 
-function getOtherUser(id) {
-	let conversation = conversations[id];
-
-	let user = Object.keys(conversation.users).filter(user => {
-		return user !== domain;
-	}).join(", ");
+const getOtherUser = id => {
+	const conversation = conversations[id];
+	const user = Object.keys(conversation.users)
+		.filter(user => user !== domain)
+		.join(", ");
 
 	return conversation.users[user];
-}
+};
 
-function isGroup(id) {
+const isGroup = id => {
 	try {
-		if (conversations[id].group) {
+		if (conversations[id].group)
 			return true;
-		}
+
 	}
-	catch (error) {}
+	catch (error) { };
 	return false;
-}
+};
 
-function nameForUserID(id) {
-	var userId = id;
-	let user = users.filter(user => {
-		return user.id == userId;
-	});
+const nameForUserID = id => users.filter(user => user.id === id)[0];
 
-	return user[0];
-}
+const typingCell = () => `<td class="typingCell flex"><div class="message typing"><div class="lds-ellipsis"><div></div><div></div><div></div><div></div></div></div></td>`;
 
-function typingCell() {
-	return '<td class="typingCell flex"><div class="message typing"><div class="lds-ellipsis"><div></div><div></div><div></div><div></div></div></div></td>';
-}
-
-function conversationRow(id, user, puny=false) {
+function conversationRow(id, user, puny = false) {
 	var subtitle = ""
 
 	if (isGroup(id)) {
@@ -1848,7 +1843,7 @@ function conversationRow(id, user, puny=false) {
 			let name = toUnicode(nameForUserID(latestMessage.user).domain);
 
 			let message = replaceIds(latestMessage.message, false);
-			subtitle = name+'<span class="decrypt">'+message+'</span>';
+			subtitle = name + '<span class="decrypt">' + message + '</span>';
 		}
 
 		var locked = "";
@@ -1859,7 +1854,7 @@ function conversationRow(id, user, puny=false) {
 			lockedCell = '<div class="locked"><div class="icon lock" title="Locked"></div></div>';
 		}
 
-		return '<tr data-id="'+id+'" class="'+locked+'"><td class="avatar">'+lockedCell+'<div class="fallback">#</div></td><td class="title">'+channel+'<div class="subtitle">'+subtitle+'</div></td>'+typingCell()+'</tr>';
+		return '<tr data-id="' + id + '" class="' + locked + '"><td class="avatar">' + lockedCell + '<div class="fallback">#</div></td><td class="title">' + channel + '<div class="subtitle">' + subtitle + '</div></td>' + typingCell() + '</tr>';
 	}
 	else {
 		var locked = "";
@@ -1879,7 +1874,7 @@ function conversationRow(id, user, puny=false) {
 			let name = toUnicode(conversations[id].users[latestMessage.user].domain);
 
 			let message = latestMessage.message;
-			subtitle = name+'<span class="decrypt">'+message+'</span>';
+			subtitle = name + '<span class="decrypt">' + message + '</span>';
 		}
 
 		let userId = getOtherUserID(id);
@@ -1888,34 +1883,29 @@ function conversationRow(id, user, puny=false) {
 
 		var decoded = "";
 		if (puny && user.domain !== userName) {
-			decoded = '<div class="decoded">('+user.domain+')</div>';
+			decoded = '<div class="decoded">(' + user.domain + ')</div>';
 		}
 
-		return '<tr data-id="'+id+'" class="'+locked+'"><td class="avatar">'+lockedCell+'<div class="favicon" data-id="'+userId+'" data-domain="'+user.domain+'"></div><div class="fallback">'+fallback.toUpperCase()+'</div></td><td class="title">'+userName+'/'+decoded+'<div class="subtitle">'+subtitle+'</div></td>'+typingCell()+'</tr>';
+		return '<tr data-id="' + id + '" class="' + locked + '"><td class="avatar">' + lockedCell + '<div class="favicon" data-id="' + userId + '" data-domain="' + user.domain + '"></div><div class="fallback">' + fallback.toUpperCase() + '</div></td><td class="title">' + userName + '/' + decoded + '<div class="subtitle">' + subtitle + '</div></td>' + typingCell() + '</tr>';
 	}
 }
 
 function userRow(user) {
-	let userName = toUnicode(user.domain);
-	let fallback = String.fromCodePoint(userName.codePointAt(0));
+	const userName = toUnicode(user.domain);
+	const fallback = String.fromCodePoint(userName.codePointAt(0));
 
-	return '<tr class="user" data-id="'+user.id+'" data-name="'+userName+'"><td class="avatar"><div class="favicon" data-id="'+user.id+'" data-domain="'+user.domain+'"></div><div class="fallback">'+fallback.toUpperCase()+'</div></td><td class="title">'+userName+'/</td></tr>';
+	return '<tr class="user" data-id="' + user.id + '" data-name="' + userName + '"><td class="avatar"><div class="favicon" data-id="' + user.id + '" data-domain="' + user.domain + '"></div><div class="fallback">' + fallback.toUpperCase() + '</div></td><td class="title">' + userName + '/</td></tr>';
 }
 
 function messageAvatar(id, domain) {
-	let fallback = String.fromCodePoint(domain.codePointAt(0));
-	
-	return '<div class="avatar"><div class="favicon" data-id="'+id+'" data-domain="'+domain+'"></div><div class="fallback">'+fallback.toUpperCase()+'</div></div>';
+	const fallback = String.fromCodePoint(domain.codePointAt(0));
+
+	return '<div class="avatar"><div class="favicon" data-id="' + id + '" data-domain="' + domain + '"></div><div class="fallback">' + fallback.toUpperCase() + '</div></div>';
 }
 
-function isAction(message) {
-	if (message.substring(0, 8) === actionString) {
-		return true;
-	}
-	return false;
-}
+const isAction = message => message.substring(0, 8) === actionString;
 
-function replaceSpecialMessages(message, prefix=true) {
+function replaceSpecialMessages(message, prefix = true) {
 	var subtitle;
 	var pre = "";
 
@@ -1945,7 +1935,7 @@ function replaceSpecialMessages(message, prefix=true) {
 	}
 
 	if (prefix) {
-		subtitle = pre+subtitle;
+		subtitle = pre + subtitle;
 	}
 
 	return subtitle;
@@ -1960,11 +1950,11 @@ function updateSubtitle(el, text) {
 }
 
 function htmlEntities(str) {
-    return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+	return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
 function decryptConversationSubtitle(id) {
-	let el = $("#conversations tr[data-id="+id+"] .title .subtitle span.decrypt");
+	let el = $("#conversations tr[data-id=" + id + "] .title .subtitle span.decrypt");
 
 	if (el.length) {
 		let dkey = conversations[id].key || null;
@@ -1985,27 +1975,27 @@ function decryptConversationSubtitle(id) {
 }
 
 function unescape(str) {
-  return (str + '==='.slice((str.length + 3) % 4))
-    .replace(/-/g, '+')
-    .replace(/_/g, '/')
+	return (str + '==='.slice((str.length + 3) % 4))
+		.replace(/-/g, '+')
+		.replace(/_/g, '/')
 }
 
 function escape(str) {
-  return str.replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=/g, '')
+	return str.replace(/\+/g, '-')
+		.replace(/\//g, '_')
+		.replace(/=/g, '')
 }
 
 function shareLink() {
 	const data = {
-		session: key,
-		privkey: keys.privateKeyJwk.d,
+		session: hc.key,
+		privkey: hc.keys.privateKeyJwk.d,
 		settings: settings
 	}
 
 	let json = JSON.stringify(data);
 	let encoded = btoa(json);
-	let link = "https://"+host+"/sync#"+encoded;
+	let link = "https://" + host + "/sync#" + encoded;
 
 	return link;
 }
@@ -2030,7 +2020,7 @@ function setupShare() {
 function setPublicKey() {
 	const data = {
 		action: "setPublicKey",
-		pubkey: JSON.stringify(keys.publicKeyJwk)
+		pubkey: JSON.stringify(hc.keys.publicKeyJwk)
 	};
 
 	return api(data);
@@ -2049,7 +2039,7 @@ function loadSettings() {
 		settings = JSON.parse(localStorage.settings);
 
 		$.each(settings, (k, setting) => {
-			root.style.setProperty("--"+k, setting);
+			root.style.setProperty("--" + k, setting);
 		});
 	}
 }
@@ -2075,7 +2065,7 @@ function onLoad() {
 						$("#addDomain input[name=domain]").remove();
 						$("#addDomain .or").remove();
 						$("#addDomain select[name=tld]").empty();
-						$("#addDomain select[name=tld]").append('<option value="'+tld+'">'+toUnicode(tld)+'</option>');
+						$("#addDomain select[name=tld]").append('<option value="' + tld + '">' + toUnicode(tld) + '</option>');
 						$("#addDomain input[name=sld]").attr("placeholder", "Choose a name");
 						$(".button[data-action=newDomain]").click();
 					}
@@ -2092,7 +2082,7 @@ function onLoad() {
 				listTLD().then(r => {
 					let options = r.tlds;
 					$.each(options, (k, o) => {
-						let option = $('<option value="'+o+'">'+toUnicode(o)+'</option>');
+						let option = $('<option value="' + o + '">' + toUnicode(o) + '</option>');
 						$("#addDomain select[name=tld]").append(option);
 					});
 
@@ -2115,7 +2105,7 @@ function onLoad() {
 								row.attr("data-name", domain.domain);
 
 								var body = $('<div />');
-								body.append(toUnicode(domain.domain)+'/');
+								body.append(toUnicode(domain.domain) + '/');
 								if (domain.locked) {
 									body.append(' (Unverified)');
 								}
@@ -2154,10 +2144,10 @@ function onLoad() {
 					}
 
 					setupDomainSelect();
-					
+
 					if (Object.keys(domains).includes(localStorage.domain)) {
 						domain = localStorage.domain;
-						$('.header .domains option[value='+domain+']').prop('selected', true);
+						$('.header .domains option[value=' + domain + ']').prop('selected', true);
 					}
 					else {
 						domain = Object.keys(domains)[0];
@@ -2190,54 +2180,53 @@ function onLoad() {
 
 		case "sync":
 			try {
-				let sync = window.location.hash.substr(1);
-				let syncData = unescape(sync);
-				let decoded = atob(syncData);
-				let json = JSON.parse(decoded);
-				key = json.session;
+				const sync = window.location.hash.substr(1);
+				const syncData = unescape(sync);
+				const decoded = atob(syncData);
+				const json = JSON.parse(decoded);
+				hc.key = json.session;
 
 				if (json.settings) {
 					settings = json.settings;
 					localStorage.setItem("settings", JSON.stringify(settings));
-				}
+				};
 
-				getPublicKey().then(r => {
-					if (r.success) {
-						let pubkey = JSON.parse(r.pubkey);
+				getPublicKey()
+					.then(r => {
+						if (r.success) {
+							let pubkey = JSON.parse(r.pubkey);
 
-						importKey(pubkey.x, pubkey.y, json.privkey).then(privkey => {
-							keys = {
-								privateKeyJwk: privkey,
-								publicKeyJwk: pubkey
-							}
+							importKey(pubkey.x, pubkey.y, json.privkey).then(privkey => {
+								hc.keys = {
+									privateKeyJwk: privkey,
+									publicKeyJwk: pubkey
+								};
 
-							localStorage.setItem("session", key);
-							localStorage.setItem("keys", JSON.stringify(keys));
-							goto("/");
-						});
-					}
-				});
+								localStorage.setItem("session", hc.key);
+								localStorage.setItem("keys", JSON.stringify(hc.keys));
+								goto("/");
+							});
+						}
+					});
 			}
 			catch (error) {
 				$("body[data-page=sync] .response").html("This link is invalid :/");
-			}
+			};
 			break;
 	}
 }
 
 function onLoadAction(data) {
 	localStorage.removeItem("action");
-
-	let split = data.split(":");
-
-	let action = split[0];
-	var info = split[1];
+	const split = data.split(":");
+	const action = split[0];
+	let info = split[1];
 
 	switch (action) {
 		case "message":
-			info = toUnicode(info)+"/";
+			info = toUnicode(info) + "/";
 			$(".popover[data-name=startConversation] input[name=domain]").val(info);
-			popover("startConversation");
+			popOver("startConversation");
 			$(".popover[data-name=startConversation] input[name=message]").focus();
 			break;
 
@@ -2250,40 +2239,40 @@ function onLoadAction(data) {
 				activeConversation(match[0]);
 			}
 			break;
-	}
+	};
 
-	window.location.replace("#");  
+	window.location.replace("#");
 	if (typeof window.history.replaceState == 'function') {
 		history.replaceState({}, '', window.location.href.slice(0, -1));
-	}
-}
+	};
+};
 
 function setupDomainSelect() {
 	$(".header .domains select").empty();
-	
+
 	$.each(domains, (k, domain) => {
 		var locked = "";
 		if (domain.locked) {
 			locked = " (Unverified)";
 		}
-		$(".header .domains select").append('<option value="'+k+'">'+toUnicode(domain.domain)+'/'+locked+'</option>');
+		$(".header .domains select").append('<option value="' + k + '">' + toUnicode(domain.domain) + '/' + locked + '</option>');
 	});
 
 	$(".header .domains select").append('<optgroup label="-----------------"></optgroup>');
 	$(".header .domains select").append('<option value="manageDomains">Manage Domains</option>');
 }
 
-async function popover(action) {
+async function popOver(action) {
 	close(true);
 
-	let output = new Promise(resolve => {
+	const output = new Promise(resolve => {
 		switch (action) {
 			case "syncSession":
 				resolve();
 				break;
 
 			case "pay":
-				$(".popover[data-name="+action+"]").find(".response").html("");
+				$(".popover[data-name=" + action + "]").find(".response").html("");
 
 				resolve();
 
@@ -2296,17 +2285,17 @@ async function popover(action) {
 				}
 
 				api(data).then(r => {
-					$(".popover[data-name="+action+"]").find(".loading").removeClass("shown");
+					$(".popover[data-name=" + action + "]").find(".loading").removeClass("shown");
 
 					if (r.success) {
-						$(".popover[data-name="+action+"]").find(".subtitle").html(to+"/ is able to accept payments!");
-						$(".popover[data-name="+action+"]").find("input[name=address]").val(r.address);
-						$(".popover[data-name="+action+"]").find(".content").addClass("shown");
-						$(".popover[data-name="+action+"]").find("input[name=hns]").focus();
+						$(".popover[data-name=" + action + "]").find(".subtitle").html(to + "/ is able to accept payments!");
+						$(".popover[data-name=" + action + "]").find("input[name=address]").val(r.address);
+						$(".popover[data-name=" + action + "]").find(".content").addClass("shown");
+						$(".popover[data-name=" + action + "]").find("input[name=hns]").focus();
 					}
 					else {
-						$(".popover[data-name="+action+"]").find(".response").addClass("error");
-						$(".popover[data-name="+action+"]").find(".response").html(r.message);
+						$(".popover[data-name=" + action + "]").find(".response").addClass("error");
+						$(".popover[data-name=" + action + "]").find(".response").html(r.message);
 					}
 				});
 				break;
@@ -2316,11 +2305,11 @@ async function popover(action) {
 				let tld = user.tld;
 
 				if (tld) {
-					$(".popover[data-name="+action+"]").find("input[name=avatar]").parent().removeClass("hidden");
-					$(".popover[data-name="+action+"]").find("input[name=avatar]").val(user.avatar);
+					$(".popover[data-name=" + action + "]").find("input[name=avatar]").parent().removeClass("hidden");
+					$(".popover[data-name=" + action + "]").find("input[name=avatar]").val(user.avatar);
 
 					if (["hnschat", "theshake"].includes(tld)) {
-						$(".popover[data-name="+action+"]").find("input[name=address]").parent().removeClass("hidden");
+						$(".popover[data-name=" + action + "]").find("input[name=address]").parent().removeClass("hidden");
 
 						const data = {
 							action: "getAddress",
@@ -2329,19 +2318,19 @@ async function popover(action) {
 
 						api(data).then(r => {
 							if (r.address) {
-								$(".popover[data-name="+action+"]").find("input[name=address]").val(r.address);
+								$(".popover[data-name=" + action + "]").find("input[name=address]").val(r.address);
 							}
 							resolve();
 						});
 					}
 					else {
-						$(".popover[data-name="+action+"]").find("input[name=address]").parent().addClass("hidden");
+						$(".popover[data-name=" + action + "]").find("input[name=address]").parent().addClass("hidden");
 						resolve();
 					}
 				}
 				else {
-					$(".popover[data-name="+action+"]").find("input[name=avatar]").parent().addClass("hidden");
-					$(".popover[data-name="+action+"]").find("input[name=address]").parent().addClass("hidden");
+					$(".popover[data-name=" + action + "]").find("input[name=avatar]").parent().addClass("hidden");
+					$(".popover[data-name=" + action + "]").find("input[name=address]").parent().addClass("hidden");
 					resolve();
 				}
 				break;
@@ -2349,7 +2338,7 @@ async function popover(action) {
 			case "mention":
 			case "emojis":
 				let bottom = $(".inputHolder").outerHeight() + 10;
-				$(".popover[data-name="+action+"]").css("bottom", bottom+"px");
+				$(".popover[data-name=" + action + "]").css("bottom", bottom + "px");
 				resolve();
 				break;
 
@@ -2362,20 +2351,20 @@ async function popover(action) {
 	output.then(() => {
 		$("#blackout").addClass("shown");
 		$("#messageHolder").addClass("noScroll");
-		$(".popover[data-name="+action+"]").addClass("shown");
+		$(".popover[data-name=" + action + "]").addClass("shown");
 
 		if (!["syncSession"].includes(action)) {
-			$(".popover[data-name="+action+"]").find("input:visible:first").focus();
-		}
+			$(".popover[data-name=" + action + "]").find("input:visible:first").focus();
+		};
 
 		if (action === "emojis") {
 			$(".popover[data-name=emojis] .body .grid").scrollTop(0);
-		}
+		};
 	});
 }
 
 function copyToClipboard(button) {
-	let field = button.parent().find("input")[0];
+	const field = button.parent().find("input")[0];
 	field.select();
 	field.setSelectionRange(0, 99999);
 	navigator.clipboard.writeText(field.value);
@@ -2387,7 +2376,7 @@ function copyToClipboard(button) {
 	}, 1000);
 }
 
-function close(old=false) {
+function close(old = false) {
 	$("#blackout").removeClass("shown");
 	$("#mention").removeClass("shown");
 	$(".popover.shown").find("input").val('');
@@ -2421,12 +2410,12 @@ const websocket = () => {
 	if (socket)
 		if (socket.readyState !== 3) return;
 
-	socket = new WebSocket("wss://"+host+"/wss");
+	socket = new WebSocket(`wss://${host}/wss`);
 
 	socket.onopen = (e) => {
 		showChat(1);
 
-		socket.send("IDENTIFY "+key);
+		socket.send("IDENTIFY " + key);
 
 		typing = setInterval(() => {
 			sendTyping();
@@ -2435,19 +2424,19 @@ const websocket = () => {
 		}, 250);
 	};
 
-	socket.onmessage = (e) => {
+	socket.onmessage = e => {
 		parse(e.data);
 	};
 
-	socket.onclose = (e) => {
+	socket.onclose = () => {
 		showChat(0);
 
 		socket = null;
 
-		setTimeout(() => { 
+		setTimeout(() => {
 			websocket();
 		}, 1000);
-	}
+	};
 }
 
 function unlockIfLocked(c, user) {
@@ -2492,7 +2481,7 @@ function parse(message) {
 						if (!Object.keys(domains).includes(body.user)) {
 							conversations[body.conversation].unreadMessages = 1;
 
-							if (body.message.includes("@"+domain)) {
+							if (body.message.includes("@" + domain)) {
 								conversations[body.conversation].unreadMentions = 1;
 							}
 						}
@@ -2569,10 +2558,10 @@ function parse(message) {
 
 		case "DELETE":
 			if (conversation == body.conversation) {
-				let thisMessage = $(".messageRow[data-id="+body.message+"]");
+				let thisMessage = $(".messageRow[data-id=" + body.message + "]");
 				let nextMessage = thisMessage.next();
 				thisMessage.remove();
-				
+
 				if (nextMessage.length) {
 					stylizeMessage(nextMessage);
 				}
@@ -2632,7 +2621,7 @@ function parse(message) {
 }
 
 function updateReactions(m) {
-	let message = $("#messages .messageRow[data-id="+m.id+"]");
+	let message = $("#messages .messageRow[data-id=" + m.id + "]");
 	if (message.length) {
 		message.find(".reactions").empty();
 
@@ -2690,14 +2679,14 @@ function updateTypingViews() {
 				if (typer.to == conversation) {
 					try {
 						let typerName = nameForUserID(typer.from).domain;
-						groupTypers.push(toUnicode(typerName)+"/");
+						groupTypers.push(toUnicode(typerName) + "/");
 					}
-					catch (error) {}
+					catch (error) { }
 				}
-				$("#conversations tr[data-id="+typer.to+"] .typingCell").addClass("shown");
+				$("#conversations tr[data-id=" + typer.to + "] .typingCell").addClass("shown");
 			}
 			else {
-				$("#conversations tr[data-id="+typer.to+"] .typingCell").removeClass("shown");
+				$("#conversations tr[data-id=" + typer.to + "] .typingCell").removeClass("shown");
 				delete typers[typer.from];
 			}
 		});
@@ -2717,7 +2706,7 @@ function updateTypingViews() {
 			}
 		}
 		else {
-			typingString = groupTypers[0]+" is typing...";
+			typingString = groupTypers[0] + " is typing...";
 		}
 		$("#typing .message").html(typingString);
 		$("#typing").addClass("shown");
@@ -2756,7 +2745,7 @@ function updateTypingViews() {
 
 function updateTypingStatus() {
 	if (lastTyped) {
-		if ((Date.now() - lastTyped) > settings.typingDelay) {
+		if ((Date.now() - lastTyped) > __settings.typingDelay) {
 			hc.imTyping = false;
 		}
 		else if ($(".input #message").is(":focus") && $(".input #message").val() !== "") {
@@ -2779,7 +2768,7 @@ function sendTyping() {
 	if (typingSent) {
 		var diff = Date.now() - typingSent;
 
-		if (diff >= settings.typingSendDelay) {
+		if (diff >= __settings.typingSendDelay) {
 			shouldSend = true;
 		}
 	}
@@ -2794,7 +2783,7 @@ function sendTyping() {
 		}
 		*/
 		typingSent = Date.now();
-		
+
 		const data = {
 			action: "typing",
 			from: domain,
@@ -2830,7 +2819,7 @@ function showOrHideAttachments() {
 	}
 }
 
-async function setSession(data=false) {
+async function setSession(data = false) {
 	let setSession = new Promise(resolve => {
 		if (localStorage.session) {
 			key = localStorage.session;
@@ -2894,7 +2883,7 @@ function tabComplete() {
 		if (text.length > 1 && text[1] !== "/") {
 			prefix = "/";
 			suffix = " ";
-			options = commands;
+			options = __settings.commands;
 
 			text = text.substring(1);
 
@@ -2928,11 +2917,11 @@ function tabComplete() {
 	});
 
 	if (matches.length) {
-		$("#message").val(prefix+matches[0]+suffix);
+		$("#message").val(prefix + matches[0] + suffix);
 	}
 }
 
-function getBrowser() { 
+function getBrowser() {
 	const browsers = {
 		Chrome: "chrome",
 		Firefox: "firefox",
@@ -2968,8 +2957,8 @@ const openConversationWith = name => {
 	if (nameForUserID(domain).locked) return;
 
 	$(".popover[data-name=startConversation] input[name=domain]").val(name);
-	popover("startConversation");
-	
+	popOver("startConversation");
+
 	setTimeout(() => {
 		$(".popover[data-name=startConversation] input[name=message]").focus();
 	}, 1);
@@ -2988,7 +2977,7 @@ function setupNotifications() {
 					}
 				}
 			});
-		} 
+		}
 	}
 }
 
@@ -3020,8 +3009,8 @@ function sendNotification(title, body, conversation) {
 }
 
 function updateReplying() {
-	if (replying) {
-		let string = "Replying to "+toUnicode(nameForUserID(replying.sender).domain)+"/";
+	if (hc.replying) {
+		let string = "Replying to " + toUnicode(nameForUserID(hc.replying.sender).domain) + "/";
 		$("#replying .message").html(string);
 		$("#replying").addClass("shown");
 	}
@@ -3057,7 +3046,7 @@ function setCaretPosition(ctrl, pos) {
 	if (ctrl.setSelectionRange) {
 		ctrl.focus();
 		ctrl.setSelectionRange(pos, pos);
-	} 
+	}
 	else if (ctrl.createTextRange) {
 		var range = ctrl.createTextRange();
 		range.collapse(true);
@@ -3084,7 +3073,7 @@ function mentions(e) {
 			let match = Array.from(toUnicode(info.domain)).slice(0, Array.from(word).length - 1).join("").toLowerCase();
 			let search = word.toLowerCase();
 
-			return !info.locked && "@"+match === search;
+			return !info.locked && "@" + match === search;
 		}).slice(0, 10);
 
 		$.each(options, (k, option) => {
@@ -3098,7 +3087,7 @@ function mentions(e) {
 	}
 
 	if (options.length) {
-		popover("mention");
+		popOver("mention");
 	}
 	else {
 		close();
@@ -3138,18 +3127,18 @@ async function signWithMetaMask(id, domain, code) {
 
 	try {
 		const account = accounts[0];
-		const signature = await ethereum.request({ method: 'personal_sign', params: [ code, account ] });
+		const signature = await ethereum.request({ method: 'personal_sign', params: [code, account] });
 		return {
 			account: account,
 			signature: signature
 		}
-	} 
+	}
 	catch (error) {
 		return error
 	}
 }
 
-async function verifySignature(id, signature, account=null) {
+async function verifySignature(id, signature, account = null) {
 	const data = {
 		action: "verifySignature",
 		domain: id,
@@ -3184,7 +3173,7 @@ function nameFromTarget(target) {
 	var name;
 
 	if (target.hasClass("favicon")) {
-		name = target.data("domain")+"/";
+		name = target.data("domain") + "/";
 	}
 	else if (target.parent().hasClass("messageRow") || target.parent().parent().hasClass("messageRow") || target.parent().parent().parent().hasClass("messageRow")) {
 		if (target.hasClass("user")) {
@@ -3196,7 +3185,7 @@ function nameFromTarget(target) {
 	}
 	else {
 		if (typeof target.data("name") !== "undefined") {
-			name = target.data("name")+"/";
+			name = target.data("name") + "/";
 		}
 	}
 
@@ -3290,11 +3279,11 @@ $(() => {
 	});
 
 	$(document).on("mouseleave", () => {
-	    setActive(false);
+		setActive(false);
 	});
 
 	$(document).on("mouseenter", () => {
-	    setActive(true);
+		setActive(true);
 	});
 
 	$(document).on("keydown", e => {
@@ -3327,7 +3316,7 @@ $(() => {
 		if (["INPUT", "TEXTAREA"].includes(target.prop("tagName"))) {
 			if (code == 13) {
 				e.preventDefault();
-				
+
 				let button = target.closest(".body").find(".button");
 				button.click();
 				return;
@@ -3364,15 +3353,15 @@ $(() => {
 	$("html").on("click", "#mention tr", e => {
 		$("#mention tr").removeClass("active");
 		$(e.currentTarget).addClass("active");
-		
-		let mention = "@"+$("#mention tr.active .title").html();
+
+		let mention = "@" + $("#mention tr.active .title").html();
 		let field = $(".input #message");
 		let text = field.val();
 		let words = text.split(" ");
 		let position = field[0].selectionStart;
 		let word = getWordForPosition(text, position);
 		let before = words[word];
-		words[word] = mention+" ";
+		words[word] = mention + " ";
 
 		var newPosition = 0;
 		for (var i = 0; i < words.length; i++) {
@@ -3509,7 +3498,7 @@ $(() => {
 				if (message.length) {
 					sendMessage(conversation, message, signature);
 				}
-				
+
 				$(".input #message").val('');
 				$(".input #signature").val('');
 				$("#attachments").empty();
@@ -3560,14 +3549,14 @@ $(() => {
 			element.html("Loading...");
 		}
 
-		var value,usd,hns,price,address,message,tld,link;
+		var value, usd, hns, price, address, message, tld, link;
 		switch (action) {
 			case "addDomain":
 			case "verifyDomain":
-				value = $(".form #"+action+" input[name=domain]").val();
+				value = $(".form #" + action + " input[name=domain]").val();
 				if (!value) {
-					sld = $(".form #"+action+" input[name=sld]").val();
-					tld = $(".form #"+action+" select[name=tld]").val();
+					sld = $(".form #" + action + " input[name=sld]").val();
+					tld = $(".form #" + action + " select[name=tld]").val();
 					action = "addSLD";
 				}
 				break;
@@ -3584,7 +3573,7 @@ $(() => {
 
 			case "startChatting":
 				if (typeof invite !== "undefined" && invite.length) {
-					goto("/#channel:"+tld);
+					goto("/#channel:" + tld);
 				}
 				else {
 					goto("/");
@@ -3662,7 +3651,7 @@ $(() => {
 				break;
 
 			case "addSLD":
-				addSLD(sld,tld).then(r => {
+				addSLD(sld, tld).then(r => {
 					if (r.success) {
 						localStorage.setItem("domain", r.domain);
 						$("#id .section").hide();
@@ -3698,7 +3687,7 @@ $(() => {
 				signWithBob(id, domainName, code).then(bob => {
 					if (bob.message) {
 						response.addClass("error");
-						response.html("Error: "+bob.message);
+						response.html("Error: " + bob.message);
 					}
 					else {
 						verifySignature(id, bob).then(r => {
@@ -3729,7 +3718,7 @@ $(() => {
 				signWithMetaMask(id, domainName, code).then(metamask => {
 					if (metamask.message) {
 						response.addClass("error");
-						response.html("Error: "+metamask.message);
+						response.html("Error: " + metamask.message);
 					}
 					else {
 						verifySignature(id, metamask.signature, metamask.account).then(r => {
@@ -3816,7 +3805,7 @@ $(() => {
 
 			case "submitDonation":
 				if (price) {
-					let link = "https://btcpay.eskimosoftware.net/api/v1/invoices?storeId=559mPWkGX7vkXjjvC7kFhtUEhBosN7TaHrbtBhjQK7UU&currency=USD&price="+price;
+					let link = "https://btcpay.eskimosoftware.net/api/v1/invoices?storeId=559mPWkGX7vkXjjvC7kFhtUEhBosN7TaHrbtBhjQK7UU&currency=USD&price=" + price;
 					goto(link);
 				}
 				else {
@@ -3834,7 +3823,7 @@ $(() => {
 				sendWithBob(address, value).then(bob => {
 					if (bob.message) {
 						response.addClass("error");
-						response.html("Error: "+bob.message);
+						response.html("Error: " + bob.message);
 					}
 					else {
 						if (bob.hash) {
@@ -3885,7 +3874,7 @@ $(() => {
 						if (r.avatar) {
 							delete avatars[domain];
 							nameForUserID(domain).avatar = r.avatar;
-							$(".favicon.loaded[data-id="+domain+"]").removeClass("loaded");
+							$(".favicon.loaded[data-id=" + domain + "]").removeClass("loaded");
 							updateAvatars();
 						}
 
@@ -3907,14 +3896,14 @@ $(() => {
 			case "purchaseSLD":
 				tld = toASCII(element.data("tld"));
 
-				link = "https://porkbun.com/tld/"+tld;
+				link = "https://porkbun.com/tld/" + tld;
 				if (element.data("registrar") == "hshub") {
-					link = "https://varo.domains/tld/"+tld;
+					link = "https://varo.domains/tld/" + tld;
 				}
 				else if (element.data("registrar") == "impervious") {
 					link = "https://impervious.domains";
 				}
-				
+
 				goto(link, true);
 
 				if (element.hasClass("button")) {
@@ -3925,7 +3914,7 @@ $(() => {
 
 			case "createSLD":
 				tld = element.data("tld");
-				link = "/invite/"+tld;
+				link = "/invite/" + tld;
 				goto(link);
 
 				if (element.hasClass("button")) {
@@ -3974,7 +3963,7 @@ $(() => {
 		switch (action) {
 			case "startConversation":
 				if (!nameForUserID(domain).locked) {
-					popover(action);
+					popOver(action);
 				}
 				break;
 
@@ -4002,7 +3991,7 @@ $(() => {
 				break;
 
 			case "donate":
-				$(".popover[data-name=donate] input[name=usd]").maskMoney({prefix:'$ '});
+				$(".popover[data-name=donate] input[name=usd]").maskMoney({ prefix: '$ ' });
 				break;
 
 			case "settings":
@@ -4016,7 +4005,7 @@ $(() => {
 				break;
 
 			case "pay":
-				$(".popover[data-name=pay] input[name=hns]").maskMoney({suffix: ' HNS', precision: 6});
+				$(".popover[data-name=pay] input[name=hns]").maskMoney({ suffix: ' HNS', precision: 6 });
 				break;
 
 			case "file":
@@ -4035,17 +4024,17 @@ $(() => {
 				break;
 
 			case "reply":
-				replying = {
+				hc.replying = {
 					message: target.closest(".messageRow").data("id"),
 					sender: target.closest(".messageRow").data("sender"),
 				}
 
-				if (!replying.message) {
+				if (!hc.replying.message) {
 					context = true;
-					replying = {
+					hc.replying = {
 						message: target.closest(".body").find("span.message").data("id"),
 						sender: target.closest(".body").find("span.message").data("sender")
-					}
+					};
 				}
 
 				updateReplying();
@@ -4053,7 +4042,7 @@ $(() => {
 				break;
 
 			case "removeReply":
-				replying = false;
+				hc.replying = false;
 				updateReplying();
 				$(".input #message").focus();
 				break;
@@ -4098,7 +4087,7 @@ $(() => {
 			case "syncSession":
 			case "pay":
 			case "emojis":
-				popover(action);
+				popOver(action);
 				break;
 		}
 
@@ -4121,10 +4110,10 @@ $(() => {
 				if (name) {
 					name = rtrim(name, "/");
 					name = toASCII(name);
-					name = toUnicode(name)+"/";
+					name = toUnicode(name) + "/";
 					let menu = $(".popover[data-name=userContext]");
 					menu.find("span.user").html(name);
-					popover("userContext");
+					popOver("userContext");
 					setContextMenuPosition(menu, e);
 				}
 			}
@@ -4149,13 +4138,13 @@ $(() => {
 					let channelName = conv.name;
 					let channelAdmins = conv.admins;
 					let channelTLDAdmin = conv.tldadmin;
-					
+
 					if ((channelTLDAdmin && myName === channelName) || me.admin || conv.admins.includes(domain)) {
 						menu.find("li.action.delete").removeClass("hidden");
 					}
 				}
 
-				popover("messageContext");
+				popOver("messageContext");
 				setContextMenuPosition(menu, e);
 			}
 		}
@@ -4195,7 +4184,7 @@ $(() => {
 		let sender = $(".popover[data-name=emojis]").data("sender");
 		let emoji = $(e.currentTarget);
 		let em = emoji.html();
-		
+
 		switch (sender) {
 			case "input":
 				let field = $(".input #message");
@@ -4241,7 +4230,7 @@ $(() => {
 
 	$("html").on("keyup", ".popover[data-name=settings] input.color", e => {
 		let target = $(e.currentTarget);
-		let name = "--"+target.attr("name");
+		let name = "--" + target.attr("name");
 		let value = target.val();
 		root.style.setProperty(name, value);
 	});
@@ -4252,23 +4241,23 @@ $(() => {
 		if (file) {
 			var url = URL.createObjectURL(file);
 			let attachments = $("#attachments");
-			let attachment = $('<div class="attachment" />'); 
-        	attachment.css("background-image", "url("+url+")");
+			let attachment = $('<div class="attachment" />');
+			attachment.css("background-image", "url(" + url + ")");
 
-        	let loading = $('<div class="uploading lds-spinner"><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div></div>');
-        	attachment.append(loading);
+			let loading = $('<div class="uploading lds-spinner"><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div></div>');
+			attachment.append(loading);
 
-        	let removeHolder = $('<div class="removeHolder" />');
-        	let remove = $('<div class="icon action remove" data-action="removeAttachment" />');
-        	removeHolder.append(remove);
-        	attachment.append(removeHolder);
+			let removeHolder = $('<div class="removeHolder" />');
+			let remove = $('<div class="icon action remove" data-action="removeAttachment" />');
+			removeHolder.append(remove);
+			attachment.append(removeHolder);
 
 			$("#attachments").append(attachment);
 			showOrHideAttachments();
 
 			var data = new FormData;
-		    data.append("file", file);
-		    data.append("key", key);
+			data.append("file", file);
+			data.append("key", key);
 			upload(data, attachment).then(r => {
 				attachment.find(".uploading").remove();
 
